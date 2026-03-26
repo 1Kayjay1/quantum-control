@@ -161,8 +161,16 @@ export function SimulationPanel() {
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <div className="grid gap-1">
+            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Seed</span>
+            <strong className="text-sm text-stone-100">{run?.solveSummary?.seed ?? run?.seed ?? 0}</strong>
+          </div>
+          <div className="grid gap-1">
             <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Route Time</span>
             <strong className="text-sm text-stone-100">{run?.metrics.totalTime.toFixed(2) ?? '0.00'} s</strong>
+          </div>
+          <div className="grid gap-1">
+            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Avg Noise</span>
+            <strong className="text-sm text-stone-100">{run?.solveSummary?.averageNoiseMagnitude?.toFixed(3) ?? '0.000'}</strong>
           </div>
           <div className="grid gap-1">
             <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Physics Steps</span>
@@ -175,6 +183,10 @@ export function SimulationPanel() {
           <div className="grid gap-1">
             <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Checkpoint Checks</span>
             <strong className="text-sm text-stone-100">{run?.solveSummary?.checkpointChecks ?? 0}</strong>
+          </div>
+          <div className="grid gap-1">
+            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Drift Accumulation</span>
+            <strong className="text-sm text-stone-100">{run?.solveSummary?.driftAccumulation?.toFixed(1) ?? '0.0'} cm</strong>
           </div>
           <div className="grid gap-1">
             <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Monte Carlo Runs</span>

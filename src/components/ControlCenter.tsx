@@ -85,6 +85,24 @@ function SimulationFields({
           value={profile.attitudeHoldGain}
           onChange={(value) => onChange({ attitudeHoldGain: value })}
         />
+        <NumberField
+          label="Ref velocity blend"
+          step={0.01}
+          value={profile.referenceVelocityBlend}
+          onChange={(value) => onChange({ referenceVelocityBlend: value })}
+        />
+        <NumberField
+          label="Ref position gain"
+          step={0.01}
+          value={profile.referencePositionGain}
+          onChange={(value) => onChange({ referencePositionGain: value })}
+        />
+        <NumberField
+          label="Ref heading assist"
+          step={0.01}
+          value={profile.referenceHeadingAssist}
+          onChange={(value) => onChange({ referenceHeadingAssist: value })}
+        />
       </div>
       <SliderField
         label="Drift offset"

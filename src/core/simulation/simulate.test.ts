@@ -135,17 +135,12 @@ describe('simulateRoute', () => {
 
     const segments = compileInstructionSequence(route, layout.spawn)
     const run = simulateRoute(segments, profile, layout, 9)
-    const headingRange = run.trace.reduce(
-      (range, point) => {
-        return {
-          min: Math.min(range.min, point.actualHeading),
-          max: Math.max(range.max, point.actualHeading),
-        }
-      },
-      { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY },
-    )
+    const headingOffsetRange = run.trace.reduce((maxOffset, point) => {
+      const offset = Math.abs(((point.actualHeading - layout.spawn.heading + 540) % 360) - 180)
+      return Math.max(maxOffset, offset)
+    }, 0)
 
-    expect(headingRange.max - headingRange.min).toBeLessThan(20)
+    expect(headingOffsetRange).toBeLessThan(20)
     expect(run.trace.at(-1)?.actualPosition.y ?? 0).toBeGreaterThan(10)
   })
 
@@ -252,5 +247,114 @@ describe('simulateRoute', () => {
     expect(lateCoast).toBeDefined()
     expect((earlyCoast?.actualSpeed ?? 0)).toBeGreaterThan(6)
     expect((lateCoast?.actualSpeed ?? 0)).toBeLessThan(earlyCoast?.actualSpeed ?? Number.POSITIVE_INFINITY)
+  })
+
+  it('produces different actual paths for different seeds under randomized conditions', () => {
+    const project = createStarterProject()
+    const route = project.routeVersions[0]
+    const layout = project.fieldLayouts[0]
+    const profile = {
+      ...project.behaviorProfiles[0],
+      randomizeConditions: true,
+      randomizationPct: 0.45,
+    }
+    const segments = compileInstructionSequence(route, layout.spawn)
+
+    const runA = simulateRoute(segments, profile, layout, 21)
+    const runB = simulateRoute(segments, profile, layout, 22)
+    const sampleCount = Math.min(runA.trace.length, runB.trace.length)
+    let maxPointDelta = 0
+
+    for (let index = 0; index < sampleCount; index += 1) {
+      const pointA = runA.trace[index]
+      const pointB = runB.trace[index]
+      const delta = Math.hypot(
+        pointA.actualPosition.x - pointB.actualPosition.x,
+        pointA.actualPosition.y - pointB.actualPosition.y,
+        pointA.actualPosition.z - pointB.actualPosition.z,
+      )
+      maxPointDelta = Math.max(maxPointDelta, delta)
+    }
+
+    expect(maxPointDelta).toBeGreaterThan(4)
+  })
+
+  it('blends overlapping movement commands instead of snapping to a single axis', () => {
+    const project = createStarterProject()
+    const layout = project.fieldLayouts[0]
+    const profile = {
+      ...project.behaviorProfiles[1],
+      randomizeConditions: false,
+    }
+    const route = {
+      ...project.routeVersions[0],
+      instructions: [
+        { ...project.routeVersions[0].instructions[0], kind: 'takeoff' as const, delayAfter: 0.1 },
+        {
+          ...project.routeVersions[0].instructions[1],
+          kind: 'moveForward' as const,
+          label: 'Forward',
+          strength: 48,
+          duration: 0.8,
+          delayAfter: 0,
+          stackNextBy: 0.3,
+          enabled: true,
+        },
+        {
+          ...project.routeVersions[0].instructions[4],
+          kind: 'strafeRight' as const,
+          label: 'Right',
+          strength: 44,
+          duration: 0.75,
+          delayAfter: 0,
+          stackNextBy: 0,
+          enabled: true,
+        },
+      ],
+    }
+
+    const segments = compileInstructionSequence(route, layout.spawn)
+    const run = simulateRoute(segments, profile, layout, 33)
+    const overlapTrace = run.trace.filter(
+      (point) => point.time >= segments[2].scheduledStart && point.time <= segments[1].scheduledEnd,
+    )
+    const xTravel =
+      (overlapTrace.at(-1)?.actualPosition.x ?? 0) - (overlapTrace[0]?.actualPosition.x ?? 0)
+    const zTravel =
+      (overlapTrace.at(-1)?.actualPosition.z ?? 0) - (overlapTrace[0]?.actualPosition.z ?? 0)
+
+    expect(overlapTrace.length).toBeGreaterThan(0)
+    expect(Math.abs(xTravel)).toBeGreaterThan(2)
+    expect(Math.abs(zTravel)).toBeGreaterThan(2)
+  })
+
+  it('lets collision aftermath push the actual path further off line than a no-contact run', () => {
+    const project = createStarterProject()
+    const route = project.routeVersions[0]
+    const baseLayout = project.fieldLayouts[0]
+    const collisionLayout = structuredClone(baseLayout)
+    collisionLayout.objects.push({
+      id: 'audit-wall',
+      type: 'wall',
+      name: 'Test Wall',
+      position: { x: -160, y: 55, z: -118 },
+      rotation: { x: 0, y: 0, z: 0 },
+      size: { x: 12, y: 110, z: 120 },
+      color: '#ff5b5b',
+      isSolid: true,
+      windResponsive: false,
+      note: 'Injected for collision aftermath test.',
+    })
+    const profile = {
+      ...project.behaviorProfiles[1],
+      randomizeConditions: false,
+    }
+    const segments = compileInstructionSequence(route, baseLayout.spawn)
+
+    const cleanRun = simulateRoute(segments, profile, baseLayout, 41)
+    const collisionRun = simulateRoute(segments, profile, collisionLayout, 41)
+
+    expect(collisionRun.metrics.collisionCount).toBeGreaterThan(cleanRun.metrics.collisionCount)
+    expect(collisionRun.metrics.pathDeviation).toBeGreaterThan(cleanRun.metrics.pathDeviation + 5)
   })
 })

@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import type { RefObject } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Line, OrbitControls, Text, TransformControls } from '@react-three/drei'
-import { Box3, Group, Mesh, Object3D, Plane as ThreePlane, Ray, Vector3 as ThreeVector3 } from 'three'
+import { Box3, Group, Object3D, Plane as ThreePlane, Ray, Vector3 as ThreeVector3 } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { useShallow } from 'zustand/react/shallow'
 
@@ -898,7 +897,7 @@ function SelectionTransformGizmo({
   onDragStateChange?: (dragging: boolean) => void
   onCommit?: () => void
 }) {
-  const proxyRef = useRef<Mesh | null>(null)
+  const proxyRef = useRef<Group | null>(null)
 
   useEffect(() => {
     if (!proxyRef.current) {
@@ -930,7 +929,6 @@ function SelectionTransformGizmo({
 
   return (
     <TransformControls
-      object={proxyRef as RefObject<Object3D>}
       mode={mode}
       translationSnap={mode === 'translate' && snapToGrid ? GRID_SIZE_CM * WORLD_SCALE : undefined}
       rotationSnap={mode === 'rotate' ? Math.PI / 12 : undefined}
@@ -977,10 +975,12 @@ function SelectionTransformGizmo({
         )
       }}
     >
-      <mesh ref={proxyRef}>
-        <boxGeometry args={[1, 1, 1]} />
-        <meshBasicMaterial transparent opacity={0.01} depthWrite={false} />
-      </mesh>
+      <group ref={proxyRef}>
+        <mesh>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshBasicMaterial transparent opacity={0.01} depthWrite={false} />
+        </mesh>
+      </group>
     </TransformControls>
   )
 }

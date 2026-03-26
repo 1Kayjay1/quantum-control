@@ -262,6 +262,9 @@ function normalizeProject(project: Project): Project {
     hoverBrakeAssistPct: profile.hoverBrakeAssistPct ?? 0.56,
     altitudeHoldGain: profile.altitudeHoldGain ?? 5.8,
     attitudeHoldGain: profile.attitudeHoldGain ?? 1,
+    referenceVelocityBlend: profile.referenceVelocityBlend ?? 0.18,
+    referencePositionGain: profile.referencePositionGain ?? 0.25,
+    referenceHeadingAssist: profile.referenceHeadingAssist ?? 0.58,
     carryPct: profile.carryPct ?? 0.36,
     coastDurationMs: profile.coastDurationMs ?? 420,
     referenceAssistDuringCoastPct: profile.referenceAssistDuringCoastPct ?? 0.24,
@@ -354,6 +357,10 @@ const PIPELINE_TEMPLATE: SimulationPipelineStage[] = [
 
 function buildPipeline(): SimulationPipelineStage[] {
   return PIPELINE_TEMPLATE.map((stage) => ({ ...stage }))
+}
+
+function createRunSeed(offset = 0): number {
+  return Date.now() + offset * 1337 + Math.floor(performance.now())
 }
 
 const starterProject = createStarterProject()
@@ -913,6 +920,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     const route = getActiveRoute(state.project, state.activeRouteId)
     const behaviorProfile = getActiveBehaviorProfile(state.project, state.activeBehaviorProfileId)
     const compareRoute = getCompareRoute(state.project, state.compareRouteId)
+    const runSeed = createRunSeed()
 
     set({
       isSolving: true,
@@ -920,6 +928,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       deepAnalysis: null,
       simulationPipeline: buildPipeline(),
       statusMessage: 'Running quick simulation...',
+      seed: runSeed,
     })
 
     await advanceStage('compile')
@@ -928,7 +937,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     await advanceStage('runtime')
     await advanceStage('planned')
     await advanceStage('actual')
-    const run = simulateRoute(plannedSegments, behaviorProfile, layout, state.seed)
+    const run = simulateRoute(plannedSegments, behaviorProfile, layout, runSeed)
 
     await advanceStage('checks')
     await advanceStage('metrics')
@@ -937,18 +946,21 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
     if (compareRoute && compareRoute.id !== route.id) {
       const compareSegments = compileInstructionSequence(compareRoute, layout.spawn)
-      comparisonRun = simulateRoute(compareSegments, behaviorProfile, layout, state.seed + 1)
+      comparisonRun = simulateRoute(compareSegments, behaviorProfile, layout, runSeed + 1)
       comparison = compareRuns(run, comparisonRun)
     }
 
     await advanceStage('replay')
     const solveTimeMs = performance.now() - startedAt
     run.solveSummary = {
+      seed: run.seed,
       physicsSteps: run.solveSummary?.physicsSteps ?? run.trace.length,
       tracePoints: run.trace.length,
       checkpointChecks: run.solveSummary?.checkpointChecks ?? 0,
       monteCarloRuns: 0,
       solveTimeMs,
+      averageNoiseMagnitude: run.solveSummary?.averageNoiseMagnitude ?? 0,
+      driftAccumulation: run.solveSummary?.driftAccumulation ?? 0,
     }
 
     set({
@@ -990,12 +1002,14 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     const layout = getActiveLayout(state.project, state.activeLayoutId)
     const route = getActiveRoute(state.project, state.activeRouteId)
     const behaviorProfile = getActiveBehaviorProfile(state.project, state.activeBehaviorProfileId)
+    const runSeed = createRunSeed()
 
     set({
       isSolving: true,
       simulationMode: 'analysis',
       simulationPipeline: buildPipeline(),
       statusMessage: 'Running deep analysis...',
+      seed: runSeed,
     })
 
     await advanceStage('compile')
@@ -1003,20 +1017,23 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     await advanceStage('runtime')
     await advanceStage('planned')
     await advanceStage('actual')
-    const run = simulateRoute(plannedSegments, behaviorProfile, layout, state.seed)
+    const run = simulateRoute(plannedSegments, behaviorProfile, layout, runSeed)
     await advanceStage('checks')
     await advanceStage('metrics')
     await advanceStage('confidence')
-    const deepAnalysis = runDeepAnalysis(plannedSegments, behaviorProfile, layout, state.seed + 20, state.monteCarloRuns)
+    const deepAnalysis = runDeepAnalysis(plannedSegments, behaviorProfile, layout, runSeed + 20, state.monteCarloRuns)
     await advanceStage('replay')
 
     const solveTimeMs = performance.now() - startedAt
     run.solveSummary = {
+      seed: run.seed,
       physicsSteps: run.solveSummary?.physicsSteps ?? run.trace.length,
       tracePoints: run.trace.length,
       checkpointChecks: run.solveSummary?.checkpointChecks ?? 0,
       monteCarloRuns: deepAnalysis.sampleCount,
       solveTimeMs,
+      averageNoiseMagnitude: run.solveSummary?.averageNoiseMagnitude ?? 0,
+      driftAccumulation: run.solveSummary?.driftAccumulation ?? 0,
     }
     run.metrics.completionSuccessEstimate = deepAnalysis.successEstimate
 

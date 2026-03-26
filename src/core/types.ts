@@ -186,6 +186,9 @@ export interface BehaviorProfile {
   hoverBrakeAssistPct: number
   altitudeHoldGain: number
   attitudeHoldGain: number
+  referenceVelocityBlend: number
+  referencePositionGain: number
+  referenceHeadingAssist: number
   driftLateralCmPerMeter: number
   driftForwardCmPerMeter: number
   driftVerticalCmPerMeter: number
@@ -337,11 +340,14 @@ export interface RunMetrics {
 }
 
 export interface SimulationSolveSummary {
+  seed: number
   physicsSteps: number
   tracePoints: number
   checkpointChecks: number
   monteCarloRuns: number
   solveTimeMs: number
+  averageNoiseMagnitude: number
+  driftAccumulation: number
 }
 
 export interface SimulationRun {

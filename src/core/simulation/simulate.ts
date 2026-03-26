@@ -69,12 +69,17 @@ interface DroneSimState {
   pitch: number
   roll: number
   yawRateDegS: number
+  disturbanceHorizontal: Vector3
+  disturbanceVerticalMps: number
+  disturbanceYawDegS: number
+  disturbanceMagnitude: number
   lastHorizontalCommand: Vector3
   coastVelocity: Vector3
   coastTimer: number
   coastDuration: number
   isCoasting: boolean
   wasCommandingHorizontal: boolean
+  collisionAftershock: number
 }
 
 interface DraftObjectBody {
@@ -108,6 +113,15 @@ interface ReferenceFlightState {
   velocityMetersPerSecond: Vec3
   heading: number
 }
+
+const DEFAULT_REFERENCE_VELOCITY_BLEND = 0.18
+const DEFAULT_REFERENCE_POSITION_GAIN = 0.25
+const DEFAULT_REFERENCE_HEADING_ASSIST = 0.58
+const COLLISION_AFTERSHOCK_SECONDS = 0.72
+const STEP_NOISE_RESPONSE = 2.6
+const STEP_NOISE_SPEED_SCALE = 0.08
+const STEP_NOISE_YAW_SCALE = 12
+const STEP_NOISE_VERTICAL_SCALE = 0.09
 
 function toMeters(valueInCentimeters: number): number {
   return valueInCentimeters / 100
@@ -590,16 +604,28 @@ function applyDroneControl(
   time: number,
   seed: number,
   reference?: ReferenceFlightState,
+  random?: () => number,
 ): void {
   const massKg = profile.massKg
   const hoverForce = massKg * 9.81 * clamp(profile.hoverAssistPct, 0.88, 1.12)
   const headingResponse = clamp(profile.turnResponsePct * 10 * profile.attitudeHoldGain, 3.5, 16)
   const isAirborne = state.body.position.y > 0.05 || state.holdAltitudeMeters > 0.08
+  state.collisionAftershock = Math.max(state.collisionAftershock - dt, 0)
+  const aftershockPct =
+    COLLISION_AFTERSHOCK_SECONDS > 0
+      ? clamp(state.collisionAftershock / COLLISION_AFTERSHOCK_SECONDS, 0, 1)
+      : 0
+  const referenceHeadingAssist = clamp(
+    profile.referenceHeadingAssist ?? DEFAULT_REFERENCE_HEADING_ASSIST,
+    0,
+    1.2,
+  )
   const headingError = reference
     ? getHeadingDeltaDegrees(reference.heading, state.heading)
     : 0
   const yawAssistDegS = clamp(
-    headingError * clamp(headingResponse * 1.8, 7, 22),
+    headingError *
+      clamp(headingResponse * 1.8 * referenceHeadingAssist * (1 - aftershockPct * 0.72), 4, 22),
     -220,
     220,
   )
@@ -653,6 +679,67 @@ function applyDroneControl(
   const carryPct = clamp(profile.carryPct, 0, 0.85)
   const referenceAssistDuringCoastPct = clamp(profile.referenceAssistDuringCoastPct, 0, 0.8)
   const hoverBrakeAssistPct = clamp(profile.hoverBrakeAssistPct, 0.15, 1.2)
+  const overlapIntensity = clamp((intent.activeInstructionIds.length - 1) / 3, 0, 1)
+  const inputIntensity = clamp(commandedMagnitude / Math.max(DRONE_MAX_SPEED_MPS, 0.001), 0, 1)
+  const speedIntensity = clamp(horizontalSpeed / Math.max(DRONE_MAX_SPEED_MPS, 0.001), 0, 1)
+  const stepVariation =
+    random && profile.randomizeConditions
+      ? clamp(
+          profile.randomizationPct *
+            (0.24 + inputIntensity * 0.36 + overlapIntensity * 0.28 + speedIntensity * 0.22),
+          0,
+          0.42,
+        )
+      : 0
+
+  if (stepVariation > 0 && random) {
+    const targetHorizontalForward =
+      signedNoise(random, stepVariation) * (STEP_NOISE_SPEED_SCALE + profile.gustStrengthCmS2 / 500)
+    const targetHorizontalRight =
+      signedNoise(random, stepVariation) * (STEP_NOISE_SPEED_SCALE + profile.driftLateralCmPerMeter / 220)
+    const targetVertical =
+      signedNoise(random, stepVariation) *
+      STEP_NOISE_VERTICAL_SCALE *
+      (0.3 + inputIntensity * 0.6)
+    const targetYaw =
+      signedNoise(random, stepVariation) *
+      STEP_NOISE_YAW_SCALE *
+      (0.2 + inputIntensity * 0.35 + overlapIntensity * 0.3)
+
+    const disturbanceBlend = clamp(dt * STEP_NOISE_RESPONSE, 0, 1)
+    state.disturbanceHorizontal = {
+      x: lerp(
+        state.disturbanceHorizontal.x,
+        forward.x * targetHorizontalForward + right.x * targetHorizontalRight,
+        disturbanceBlend,
+      ),
+      y: 0,
+      z: lerp(
+        state.disturbanceHorizontal.z,
+        forward.z * targetHorizontalForward + right.z * targetHorizontalRight,
+        disturbanceBlend,
+      ),
+    }
+    state.disturbanceVerticalMps = lerp(
+      state.disturbanceVerticalMps,
+      targetVertical,
+      disturbanceBlend,
+    )
+    state.disturbanceYawDegS = lerp(
+      state.disturbanceYawDegS,
+      targetYaw,
+      disturbanceBlend,
+    )
+  } else {
+    const disturbanceBlend = clamp(dt * (STEP_NOISE_RESPONSE + 0.8), 0, 1)
+    state.disturbanceHorizontal = {
+      x: lerp(state.disturbanceHorizontal.x, 0, disturbanceBlend),
+      y: 0,
+      z: lerp(state.disturbanceHorizontal.z, 0, disturbanceBlend),
+    }
+    state.disturbanceVerticalMps = lerp(state.disturbanceVerticalMps, 0, disturbanceBlend)
+    state.disturbanceYawDegS = lerp(state.disturbanceYawDegS, 0, disturbanceBlend)
+  }
 
   if (hasHorizontalCommand) {
     if (state.isCoasting) {
@@ -718,10 +805,15 @@ function applyDroneControl(
 
   state.wasCommandingHorizontal = hasHorizontalCommand
 
+  const referenceVelocityBlendBase = clamp(
+    profile.referenceVelocityBlend ?? DEFAULT_REFERENCE_VELOCITY_BLEND,
+    0,
+    0.8,
+  )
   const referenceVelocityBlend = reference
     ? state.isCoasting
       ? referenceAssistDuringCoastPct
-      : 0.74
+      : referenceVelocityBlendBase * (1 - aftershockPct * 0.7)
     : 0
   const desiredHorizontalMps = reference
     ? {
@@ -740,10 +832,15 @@ function applyDroneControl(
     : { ...rawCommandedHorizontalMps }
 
   if (reference) {
-    const baseTrackingGain = clamp(3.6 + profile.turnResponsePct * 2.4, 3.4, 7.4)
+    const baseTrackingGain = clamp(
+      (profile.referencePositionGain ?? DEFAULT_REFERENCE_POSITION_GAIN) *
+        (4.2 + profile.turnResponsePct * 1.6),
+      0.45,
+      4.4,
+    )
     const trackingGain = state.isCoasting
       ? baseTrackingGain * referenceAssistDuringCoastPct
-      : baseTrackingGain
+      : baseTrackingGain * (1 - aftershockPct * 0.78)
     desiredHorizontalMps.x +=
       (reference.positionMeters.x - state.body.position.x) * trackingGain
     desiredHorizontalMps.z +=
@@ -764,6 +861,9 @@ function applyDroneControl(
     desiredHorizontalMps.x += gustX
     desiredHorizontalMps.z += gustZ
   }
+
+  desiredHorizontalMps.x += state.disturbanceHorizontal.x
+  desiredHorizontalMps.z += state.disturbanceHorizontal.z
 
   const groundEffectGain = getGroundEffectGain(state.body.position.y)
   const dirtyAirFactor = getDirtyAirFactor(currentVelocity.y, horizontalSpeed) * (intent.autoHover ? 0.18 : 1)
@@ -812,7 +912,8 @@ function applyDroneControl(
   const desiredVerticalVelocity = clamp(
     toMeters(intent.verticalRateCmS) * speedScale +
       (state.holdAltitudeMeters - state.body.position.y) * clamp(profile.altitudeHoldGain, 2.4, 9) -
-      dirtyAirFactor * 0.22,
+      dirtyAirFactor * 0.22 +
+      state.disturbanceVerticalMps,
     -1.8,
     1.8,
   )
@@ -829,10 +930,7 @@ function applyDroneControl(
     DRONE_PLANFORM_AREA_M2 *
     currentVelocity.y *
     Math.abs(currentVelocity.y)
-  const forceY =
-    (hoverForce + massKg * desiredVerticalAcceleration) /
-      groundEffectGain +
-    verticalDragForce
+  const forceY = hoverForce * groundEffectGain + massKg * desiredVerticalAcceleration + verticalDragForce
 
   applyBodyForce(
     { body: state.body },
@@ -853,9 +951,12 @@ function applyDroneControl(
           : intent.autoHover
             ? 0.08 + hoverBrakeAssistPct * 0.12
             : 0.06),
-    0.15,
+    0.12,
     0.82,
   )
+  if (aftershockPct > 0) {
+    state.body.linearDamping = Math.max(0.1, state.body.linearDamping - aftershockPct * 0.08)
+  }
 
   const desiredPitch = clamp(
     -(localForwardSpeed * 0.18 +
@@ -870,9 +971,19 @@ function applyDroneControl(
   )
   state.pitch = lerp(state.pitch, desiredPitch, clamp(dt * 6.5, 0, 1))
   state.roll = lerp(state.roll, desiredRoll, clamp(dt * 6.5, 0, 1))
+  if (aftershockPct > 0) {
+    state.pitch += Math.sin(time * 19 + seed * 0.13) * 0.08 * aftershockPct
+    state.roll += Math.cos(time * 17 + seed * 0.09) * 0.08 * aftershockPct
+  }
   state.heading = normalizeHeading(
-    state.heading + nextYawRateDegS * dt,
+    state.heading + (nextYawRateDegS + state.disturbanceYawDegS) * dt,
   )
+  state.disturbanceMagnitude =
+    Math.hypot(
+      state.disturbanceHorizontal.x,
+      state.disturbanceHorizontal.z,
+      state.disturbanceVerticalMps,
+    ) + Math.abs(state.disturbanceYawDegS) * 0.01
 
   const maxHorizontalSpeed = Math.max(
     Math.hypot(desiredHorizontalMps.x, desiredHorizontalMps.z) + 0.55,
@@ -1139,12 +1250,17 @@ function simulateCore(
     pitch: 0,
     roll: 0,
     yawRateDegS: 0,
+    disturbanceHorizontal: { x: 0, y: 0, z: 0 },
+    disturbanceVerticalMps: 0,
+    disturbanceYawDegS: 0,
+    disturbanceMagnitude: 0,
     lastHorizontalCommand: { x: 0, y: 0, z: 0 },
     coastVelocity: { x: 0, y: 0, z: 0 },
     coastTimer: 0,
     coastDuration: 0,
     isCoasting: false,
     wasCommandingHorizontal: false,
+    collisionAftershock: 0,
   }
   const plannedState: DroneSimState = {
     body: plannedWorld.body,
@@ -1153,12 +1269,17 @@ function simulateCore(
     pitch: 0,
     roll: 0,
     yawRateDegS: 0,
+    disturbanceHorizontal: { x: 0, y: 0, z: 0 },
+    disturbanceVerticalMps: 0,
+    disturbanceYawDegS: 0,
+    disturbanceMagnitude: 0,
     lastHorizontalCommand: { x: 0, y: 0, z: 0 },
     coastVelocity: { x: 0, y: 0, z: 0 },
     coastTimer: 0,
     coastDuration: 0,
     isCoasting: false,
     wasCommandingHorizontal: false,
+    collisionAftershock: 0,
   }
 
   const plannedPointsBySegment = new Map<string, Vector3[]>()
@@ -1175,6 +1296,9 @@ function simulateCore(
   let actualCollisionSet = new Set<string>()
   let physicsSteps = 0
   let checkpointChecks = 0
+  let accumulatedNoiseMagnitude = 0
+  let accumulatedDrift = 0
+  let driftSamples = 0
   let landingResult: LandingResult = {
     surface: 'none',
     objectId: null,
@@ -1189,7 +1313,7 @@ function simulateCore(
 
   for (let time = 0; time <= totalTime + 0.0001; time += PHYSICS_STEP_SECONDS) {
     physicsSteps += 1
-    const actualIntent = resolveIntent(actualWindows, time, plannedState.heading)
+    const actualIntent = resolveIntent(actualWindows, time, actualState.heading)
     const plannedIntent = resolveIntent(plannedWindows, time, plannedState.heading)
     applyDroneControl(plannedState, plannedProfile, plannedIntent, PHYSICS_STEP_SECONDS, time, seed + 17)
     applyDroneControl(
@@ -1204,6 +1328,7 @@ function simulateCore(
         velocityMetersPerSecond: plannedState.body.velocity.clone(),
         heading: plannedState.heading,
       },
+      random,
     )
     applyPropWashToObjects(
       actualWorld.draftBodies,
@@ -1240,6 +1365,9 @@ function simulateCore(
         plannedState.body.velocity.z,
       ),
     )
+    accumulatedNoiseMagnitude += actualState.disturbanceMagnitude
+    accumulatedDrift += distanceBetween(actualPosition, plannedPosition)
+    driftSamples += 1
 
     if (actualIntent.primarySegmentId) {
       getOrCreateArray(actualPointsBySegment, actualIntent.primarySegmentId).push(actualPosition)
@@ -1370,6 +1498,10 @@ function simulateCore(
         continue
       }
 
+      actualState.collisionAftershock = Math.max(
+        actualState.collisionAftershock,
+        COLLISION_AFTERSHOCK_SECONDS,
+      )
       collisionIds.add(collisionId)
       if (actualIntent.primarySegmentId) {
         getOrCreateSet(collisionsBySegment, actualIntent.primarySegmentId).add(collisionId)
@@ -1620,11 +1752,14 @@ function simulateCore(
     missedObjectIds: [...missedObjectIds],
     metrics,
     solveSummary: {
+      seed,
       physicsSteps,
       tracePoints: trace.length,
       checkpointChecks,
       monteCarloRuns: 0,
       solveTimeMs: 0,
+      averageNoiseMagnitude: driftSamples > 0 ? accumulatedNoiseMagnitude / driftSamples : 0,
+      driftAccumulation: accumulatedDrift,
     },
   }
 
