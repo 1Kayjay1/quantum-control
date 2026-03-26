@@ -57,6 +57,12 @@ export type MissionPassCondition =
   | 'landOn'
 
 export type LandingSurface = 'landingPad' | 'bullseye' | 'cubeLarge' | 'cubeSmall' | 'none'
+export type CollisionContactType =
+  | 'bodyHit'
+  | 'armBrush'
+  | 'motorGuardBrush'
+  | 'grazingContact'
+  | 'hardStop'
 
 export type PlaybackState = 'idle' | 'playing' | 'paused'
 export type SimulationMode = 'quick' | 'replay' | 'analysis'
@@ -249,6 +255,28 @@ export interface FailureMarker {
   message: string
   position: Vector3
   time: number
+  severity?: 'brush' | 'bump' | 'hard'
+  rawContactCount?: number
+  contactType?: CollisionContactType
+  normal?: Vector3
+}
+
+export interface CollisionEvent {
+  id: string
+  objectId: string
+  objectName: string
+  instructionId: string
+  segmentId: string
+  firstContactTime: number
+  lastContactTime: number
+  contactCount: number
+  rawContactCount: number
+  severity: 'brush' | 'bump' | 'hard'
+  peakSpeed: number
+  position: Vector3
+  representativeContactPoint: Vector3
+  representativeNormal: Vector3
+  contactType: CollisionContactType
 }
 
 export interface SimulationTracePoint {
@@ -361,6 +389,7 @@ export interface SimulationRun {
   segments: SimulationSegmentResult[]
   trace: SimulationTracePoint[]
   failureMarkers: FailureMarker[]
+  collisionEvents: CollisionEvent[]
   checkpointResults: CheckpointResult[]
   completedCheckpointIds: string[]
   skippedCheckpointIds: string[]

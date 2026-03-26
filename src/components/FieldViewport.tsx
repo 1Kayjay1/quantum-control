@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Line, OrbitControls, Text, TransformControls } from '@react-three/drei'
+import { Line, OrbitControls, Text } from '@react-three/drei'
 import { Box3, Group, Object3D, Plane as ThreePlane, Ray, Vector3 as ThreeVector3 } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { useShallow } from 'zustand/react/shallow'
@@ -16,6 +16,13 @@ import {
   GRID_SIZE_CM,
   WORLD_SCALE,
 } from '../core/constants'
+import {
+  buildDroneMeshFitReport,
+  computeDroneProxyBounds,
+  DRONE_PHYSICS_PROXY_COMPONENTS,
+  DRONE_SCORING_PROXY_COMPONENTS,
+  type DroneMeshFitReport,
+} from '../core/droneCollision'
 import { clamp, degreesToRadians, roundToGrid } from '../core/math'
 import { getActiveBehaviorProfile, getActiveLayout, getActiveRoute } from '../core/selectors'
 import { getTracePointAtTime } from '../core/simulation/analysis'
@@ -140,17 +147,9 @@ function SceneCameraRig({
 
 interface DragState {
   objectId: string
+  origin: Vector3
   position: Vector3
 }
-
-interface TransformState {
-  objectId: string
-  position: Vector3
-  rotation: Vector3
-  size: Vector3
-}
-
-type TransformMode = 'translate' | 'rotate' | 'scale'
 
 function toWorld(point: Vector3): [number, number, number] {
   return [point.x * WORLD_SCALE, point.y * WORLD_SCALE, point.z * WORLD_SCALE]
@@ -197,18 +196,6 @@ function clampObjectPosition(
     y: clampedY,
     z: snapToGrid ? roundToGrid(clampedZ, GRID_SIZE_CM) : clampedZ,
   }
-}
-
-function clampObjectSize(size: Vector3, layout: FieldLayout): Vector3 {
-  return {
-    x: clamp(size.x, 4, layout.width),
-    y: clamp(size.y, 4, layout.height),
-    z: clamp(size.z, 4, layout.length),
-  }
-}
-
-function radiansToDegrees(value: number): number {
-  return (value * 180) / Math.PI
 }
 
 function getTraceTrail(
@@ -347,6 +334,7 @@ function normalizeDroneScene(scene: Object3D): Object3D {
 
 let cachedDroneAsset: Object3D | null | undefined
 let droneAssetPromise: Promise<Object3D | null> | null = null
+let cachedDroneFitReport: DroneMeshFitReport | null = null
 
 function loadDroneAsset(): Promise<Object3D | null> {
   if (droneAssetPromise) {
@@ -368,6 +356,14 @@ function loadDroneAsset(): Promise<Object3D | null> {
       loader.load(
         path,
         (gltf) => {
+          const importedBounds = new Box3().setFromObject(gltf.scene)
+          const importedSize = importedBounds.getSize(new ThreeVector3())
+          cachedDroneFitReport = buildDroneMeshFitReport({
+            x: importedSize.x,
+            y: importedSize.y,
+            z: importedSize.z,
+          })
+          console.info('[Quantum Control] Drone mesh fit report', cachedDroneFitReport)
           resolve(normalizeDroneScene(gltf.scene))
         },
         undefined,
@@ -388,6 +384,7 @@ function useDroneAsset() {
   const [asset, setAsset] = useState<Object3D | null>(() =>
     cachedDroneAsset ? cachedDroneAsset.clone(true) : null,
   )
+  const [fitReport, setFitReport] = useState<DroneMeshFitReport | null>(cachedDroneFitReport)
   const [mode, setMode] = useState<'loading' | 'gltf' | 'fallback'>(() => {
     if (cachedDroneAsset === undefined) {
       return 'loading'
@@ -408,6 +405,7 @@ function useDroneAsset() {
       }
 
       setAsset(loadedAsset ? loadedAsset.clone(true) : null)
+      setFitReport(cachedDroneFitReport)
       setMode(loadedAsset ? 'gltf' : 'fallback')
     })
 
@@ -418,6 +416,7 @@ function useDroneAsset() {
 
   return {
     asset,
+    fitReport,
     mode,
   }
 }
@@ -527,6 +526,32 @@ function DroneColliderGhost() {
   )
 }
 
+function DroneScoringGhost() {
+  return (
+    <group>
+      {DRONE_SCORING_PROXY_COMPONENTS.map((component) =>
+        component.shape === 'sphere' ? (
+          <mesh
+            key={component.id}
+            position={[component.offset.x, component.offset.y, component.offset.z]}
+          >
+            <sphereGeometry args={[component.radius ?? 0, 12, 12]} />
+            <meshBasicMaterial color="#60a5fa" wireframe transparent opacity={0.5} />
+          </mesh>
+        ) : (
+          <mesh
+            key={component.id}
+            position={[component.offset.x, component.offset.y, component.offset.z]}
+          >
+            <boxGeometry args={[component.size?.x ?? 0, component.size?.y ?? 0, component.size?.z ?? 0]} />
+            <meshBasicMaterial color="#60a5fa" wireframe transparent opacity={0.5} />
+          </mesh>
+        ),
+      )}
+    </group>
+  )
+}
+
 function DroneVisual({
   position,
   heading,
@@ -535,6 +560,7 @@ function DroneVisual({
   tint,
   label,
   showCollider = false,
+  showScoringCollider = false,
   transparent = false,
 }: {
   position: Vector3
@@ -544,6 +570,7 @@ function DroneVisual({
   tint: string
   label: string
   showCollider?: boolean
+  showScoringCollider?: boolean
   transparent?: boolean
 }) {
   const { asset } = useDroneAsset()
@@ -565,6 +592,7 @@ function DroneVisual({
           />
         </mesh>
         {showCollider ? <DroneColliderGhost /> : null}
+        {showScoringCollider ? <DroneScoringGhost /> : null}
       </group>
       <Text position={[0, 0.08, 0]} fontSize={0.04} color={transparent ? '#cbd5f5' : tint} anchorX="center">
         {label}
@@ -878,127 +906,14 @@ function FieldObjectMesh({
   )
 }
 
-function SelectionTransformGizmo({
-  layout,
-  object,
-  preview,
-  mode,
-  snapToGrid,
-  onPreview,
-  onDragStateChange,
-  onCommit,
-}: {
-  layout: FieldLayout
-  object: FieldObject
-  preview: TransformState | null
-  mode: TransformMode
-  snapToGrid: boolean
-  onPreview?: (next: TransformState) => void
-  onDragStateChange?: (dragging: boolean) => void
-  onCommit?: () => void
-}) {
-  const proxyRef = useRef<Group | null>(null)
-
-  useEffect(() => {
-    if (!proxyRef.current) {
-      return
-    }
-
-    const source = preview?.objectId === object.id
-      ? preview
-      : {
-          objectId: object.id,
-          position: object.position,
-          rotation: object.rotation,
-          size: object.size,
-        }
-
-    proxyRef.current.position.set(...toWorld(source.position))
-    proxyRef.current.rotation.set(
-      degreesToRadians(source.rotation.x),
-      degreesToRadians(source.rotation.y),
-      degreesToRadians(source.rotation.z),
-    )
-    proxyRef.current.scale.set(
-      Math.max(source.size.x * WORLD_SCALE, 0.04),
-      Math.max(source.size.y * WORLD_SCALE, 0.04),
-      Math.max(source.size.z * WORLD_SCALE, 0.04),
-    )
-    proxyRef.current.updateMatrixWorld()
-  }, [object, preview])
-
-  return (
-    <TransformControls
-      mode={mode}
-      translationSnap={mode === 'translate' && snapToGrid ? GRID_SIZE_CM * WORLD_SCALE : undefined}
-      rotationSnap={mode === 'rotate' ? Math.PI / 12 : undefined}
-      scaleSnap={mode === 'scale' ? 0.05 : undefined}
-      onMouseDown={() => {
-        queueMicrotask(() => {
-          onDragStateChange?.(true)
-        })
-      }}
-      onMouseUp={() => {
-        queueMicrotask(() => {
-          onDragStateChange?.(false)
-          onCommit?.()
-        })
-      }}
-      onObjectChange={() => {
-        if (!proxyRef.current) {
-          return
-        }
-
-        const rawPosition = {
-          x: worldToCentimeters(proxyRef.current.position.x),
-          y: worldToCentimeters(proxyRef.current.position.y),
-          z: worldToCentimeters(proxyRef.current.position.z),
-        }
-        queueMicrotask(() =>
-          onPreview?.({
-            objectId: object.id,
-            position: clampObjectPosition(rawPosition, object, layout, snapToGrid),
-            rotation: {
-              x: radiansToDegrees(proxyRef.current!.rotation.x),
-              y: radiansToDegrees(proxyRef.current!.rotation.y),
-              z: radiansToDegrees(proxyRef.current!.rotation.z),
-            },
-            size: clampObjectSize(
-              {
-                x: worldToCentimeters(proxyRef.current!.scale.x),
-                y: worldToCentimeters(proxyRef.current!.scale.y),
-                z: worldToCentimeters(proxyRef.current!.scale.z),
-              },
-              layout,
-            ),
-          }),
-        )
-      }}
-    >
-      <group ref={proxyRef}>
-        <mesh>
-          <boxGeometry args={[1, 1, 1]} />
-          <meshBasicMaterial transparent opacity={0.01} depthWrite={false} />
-        </mesh>
-      </group>
-    </TransformControls>
-  )
-}
-
 function SceneView({
   layout,
   selectedObjectId,
   onSelectObject,
   dragState,
-  transformState,
-  transformMode,
-  transformDragging,
   snapToGrid,
   onStartDrag,
   onPreviewDrag,
-  onPreviewTransform,
-  onTransformDragStateChange,
-  onCommitTransform,
   plannedDrone,
   plannedHeading,
   plannedPitch,
@@ -1010,23 +925,19 @@ function SceneView({
   plannedPath,
   actualPath,
   failureMarkers,
+  collisionEvents,
   dynamicObjectPositions,
   dynamicObjectTransforms,
   sceneMode,
+  physicsDebugEnabled,
 }: {
   layout: FieldLayout
   selectedObjectId: string | null
   onSelectObject: (objectId: string | null) => void
   dragState: DragState | null
-  transformState: TransformState | null
-  transformMode: TransformMode
-  transformDragging: boolean
   snapToGrid: boolean
   onStartDrag: (objectId: string) => void
   onPreviewDrag: (position: Vector3) => void
-  onPreviewTransform: (next: TransformState) => void
-  onTransformDragStateChange: (dragging: boolean) => void
-  onCommitTransform: () => void
   plannedDrone: Vector3
   plannedHeading: number
   plannedPitch: number
@@ -1038,9 +949,11 @@ function SceneView({
   plannedPath: Vector3[]
   actualPath: Vector3[]
   failureMarkers: SimulationRun['failureMarkers']
+  collisionEvents: SimulationRun['collisionEvents']
   dynamicObjectPositions?: Record<string, Vector3>
   dynamicObjectTransforms?: Record<string, { position: Vector3; rotation: Vector3 }>
   sceneMode: boolean
+  physicsDebugEnabled: boolean
 }) {
   const draggedObject = dragState
     ? layout.objects.find((object) => object.id === dragState.objectId) ?? null
@@ -1058,7 +971,19 @@ function SceneView({
     if (!projected) {
       return
     }
-    onPreviewDrag(clampObjectPosition(projected, draggedObject, layout, snapToGrid))
+    const modifierState = event as {
+      shiftKey?: boolean
+      ctrlKey?: boolean
+      nativeEvent?: { shiftKey?: boolean; ctrlKey?: boolean }
+    }
+    const shiftKey = modifierState.shiftKey ?? modifierState.nativeEvent?.shiftKey ?? false
+    const ctrlKey = modifierState.ctrlKey ?? modifierState.nativeEvent?.ctrlKey ?? false
+    const constrained = {
+      x: ctrlKey ? dragState.origin.x : projected.x,
+      y: projected.y,
+      z: shiftKey ? dragState.origin.z : projected.z,
+    }
+    onPreviewDrag(clampObjectPosition(constrained, draggedObject, layout, snapToGrid))
   }
 
   return (
@@ -1091,19 +1016,12 @@ function SceneView({
           onSelect={onSelectObject}
           onStartDrag={onStartDrag}
           displayPosition={
-            transformState?.objectId === object.id
-              ? transformState.position
-              : dragState?.objectId === object.id
+            dragState?.objectId === object.id
               ? dragState.position
               : dynamicObjectTransforms?.[object.id]?.position ?? dynamicObjectPositions?.[object.id]
           }
           displayRotation={
-            transformState?.objectId === object.id
-              ? transformState.rotation
-              : dynamicObjectTransforms?.[object.id]?.rotation
-          }
-          displaySize={
-            transformState?.objectId === object.id ? transformState.size : undefined
+            dynamicObjectTransforms?.[object.id]?.rotation
           }
         />
       ))}
@@ -1122,19 +1040,6 @@ function SceneView({
         </mesh>
       ) : null}
 
-      {selectedObject && !dragState ? (
-        <SelectionTransformGizmo
-          layout={layout}
-          object={selectedObject}
-          preview={transformState}
-          mode={transformMode}
-          snapToGrid={snapToGrid}
-          onPreview={onPreviewTransform}
-          onDragStateChange={onTransformDragStateChange}
-          onCommit={onCommitTransform}
-        />
-      ) : null}
-
       {plannedPath.length > 1 ? (
         <Line points={buildPath(plannedPath)} color="#f6d36a" lineWidth={1.1} transparent opacity={0.44} />
       ) : null}
@@ -1149,7 +1054,11 @@ function SceneView({
           <meshStandardMaterial
             color={
               marker.type === 'collision'
-                ? '#ff7b86'
+                ? marker.severity === 'hard'
+                  ? '#ff4d5f'
+                  : marker.severity === 'bump'
+                    ? '#ff9a62'
+                    : '#ffd36e'
                 : marker.type === 'checkpoint'
                   ? '#a78bfa'
                   : marker.type === 'miss'
@@ -1160,6 +1069,37 @@ function SceneView({
           />
         </mesh>
       ))}
+
+      {physicsDebugEnabled
+        ? collisionEvents.map((event) => (
+            <group key={`contact-${event.id}`}>
+              <mesh position={toWorld(event.representativeContactPoint)}>
+                <sphereGeometry args={[0.026, 12, 12]} />
+                <meshBasicMaterial
+                  color={
+                    event.severity === 'hard'
+                      ? '#fb7185'
+                      : event.severity === 'bump'
+                        ? '#f59e0b'
+                        : '#fde68a'
+                  }
+                />
+              </mesh>
+              <Line
+                points={[
+                  toWorld(event.representativeContactPoint),
+                  toWorld({
+                    x: event.representativeContactPoint.x + event.representativeNormal.x * 12,
+                    y: event.representativeContactPoint.y + event.representativeNormal.y * 12,
+                    z: event.representativeContactPoint.z + event.representativeNormal.z * 12,
+                  }),
+                ]}
+                color="#f8fafc"
+                lineWidth={1.2}
+              />
+            </group>
+          ))
+        : null}
 
       <DroneVisual
         position={plannedDrone}
@@ -1178,11 +1118,12 @@ function SceneView({
         tint="#74b6ff"
         label="Actual"
         showCollider
+        showScoringCollider={physicsDebugEnabled}
       />
 
       <OrbitControls
         makeDefault
-        enabled={!sceneMode && !dragState && !transformDragging}
+        enabled={!sceneMode && !dragState}
         enableDamping
         dampingFactor={0.08}
         enablePan
@@ -1192,7 +1133,7 @@ function SceneView({
         maxDistance={9}
         maxPolarAngle={Math.PI / 2.02}
       />
-      <SceneCameraRig enabled={sceneMode && !dragState && !transformDragging} focusPosition={selectedObject?.position ?? null} />
+      <SceneCameraRig enabled={sceneMode && !dragState} focusPosition={selectedObject?.position ?? null} />
     </>
   )
 }
@@ -1234,9 +1175,6 @@ export function FieldViewport() {
     })),
   )
   const [dragState, setDragState] = useState<DragState | null>(null)
-  const [transformMode, setTransformMode] = useState<TransformMode>('translate')
-  const [transformState, setTransformState] = useState<TransformState | null>(null)
-  const [transformDragging, setTransformDragging] = useState(false)
 
   const layout = getActiveLayout(project, activeLayoutId)
   const route = getActiveRoute(project, activeRouteId)
@@ -1258,6 +1196,8 @@ export function FieldViewport() {
   const actualRoll = activeTrace?.actualRoll ?? 0
   const plannedPath = compiledSegments.flatMap((segment) => segment.plannedPoints)
   const actualPath = getTraceTrail(run, playbackTime, 'actualPosition')
+  const dronePhysicsProxyBounds = computeDroneProxyBounds(DRONE_PHYSICS_PROXY_COMPONENTS)
+  const droneScoringProxyBounds = computeDroneProxyBounds(DRONE_SCORING_PROXY_COMPONENTS)
   const dynamicObjectPositions = activeTrace?.dynamicObjectPositions
   const dynamicObjectTransforms = activeTrace?.dynamicObjects
     ? Object.fromEntries(
@@ -1309,9 +1249,6 @@ export function FieldViewport() {
   const totalFrames = Math.round((run?.metrics.totalTime ?? 0) / (1 / 60))
   const toolbarButtonClass =
     'inline-flex items-center justify-center rounded-xl border border-white/8 bg-white/[0.04] px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] hover:text-white'
-  const activeToolbarButtonClass =
-    'inline-flex items-center justify-center rounded-xl border border-amber-300/35 bg-amber-300/12 px-3 py-2 text-sm font-medium text-amber-100 transition hover:bg-amber-300/16'
-
   const handleStartDrag = (objectId: string) => {
     const object = layout.objects.find((candidate) => candidate.id === objectId)
     if (!object) {
@@ -1320,6 +1257,7 @@ export function FieldViewport() {
 
     setDragState({
       objectId,
+      origin: { ...object.position },
       position: { ...object.position },
     })
     selectObject(objectId)
@@ -1355,29 +1293,51 @@ export function FieldViewport() {
     }
   }, [dragState, updateFieldObject])
 
-  const handleCommitTransform = () => {
-    const pendingTransform =
-      transformState?.objectId === selectedObject?.id
-        ? transformState
-        : selectedObject
-          ? {
-              objectId: selectedObject.id,
-              position: selectedObject.position,
-              rotation: selectedObject.rotation,
-              size: selectedObject.size,
-            }
-          : null
-
-    if (!pendingTransform) {
+  useEffect(() => {
+    if (!selectedObject || dragState || workspaceMode === 'scene') {
       return
     }
 
-    updateFieldObject(pendingTransform.objectId, {
-      position: pendingTransform.position,
-      rotation: pendingTransform.rotation,
-      size: pendingTransform.size,
-    })
-  }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return
+      }
+
+      const step = event.shiftKey ? 1 : event.ctrlKey ? 10 : 4
+      let nextPosition: Vector3 | null = null
+
+      if (event.key === 'ArrowUp') {
+        nextPosition = { ...selectedObject.position, y: selectedObject.position.y + step }
+      } else if (event.key === 'ArrowDown') {
+        nextPosition = { ...selectedObject.position, y: selectedObject.position.y - step }
+      } else if (event.key === 'ArrowLeft') {
+        nextPosition = { ...selectedObject.position, x: selectedObject.position.x - step }
+      } else if (event.key === 'ArrowRight') {
+        nextPosition = { ...selectedObject.position, x: selectedObject.position.x + step }
+      }
+
+      if (!nextPosition) {
+        return
+      }
+
+      event.preventDefault()
+      updateFieldObject(selectedObject.id, {
+        position: clampObjectPosition(nextPosition, selectedObject, layout, snapToGrid),
+      })
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [dragState, layout, selectedObject, snapToGrid, updateFieldObject, workspaceMode])
 
   return (
     <section className={`relative min-h-0 w-full overflow-hidden ${workspaceMode === 'scene' ? 'h-full rounded-none' : 'h-[clamp(560px,66vh,740px)] rounded-[22px] max-[900px]:h-[clamp(440px,56vh,540px)]'} bg-[radial-gradient(circle_at_22%_10%,rgba(116,182,255,0.12),transparent_22%),linear-gradient(180deg,rgba(32,67,126,0.96)_0%,rgba(14,31,70,0.98)_42%,rgba(20,44,25,0.98)_42.5%,rgba(10,19,15,1)_100%)]`}>
@@ -1401,6 +1361,8 @@ export function FieldViewport() {
               <span>Vel Vec: {velocityVector.x.toFixed(1)} / {velocityVector.z.toFixed(1)}</span>
               <span>Pitch/Roll: {activeTrace?.actualPitch.toFixed(2) ?? '0.00'} / {activeTrace?.actualRoll.toFixed(2) ?? '0.00'}</span>
               <span>Ground Effect: {actualDrone.y < 25 ? 'Elevated' : 'Normal'}</span>
+              <span>Proxy W/L/H: {(dronePhysicsProxyBounds.size.x * 100).toFixed(1)} / {(dronePhysicsProxyBounds.size.z * 100).toFixed(1)} / {(dronePhysicsProxyBounds.size.y * 100).toFixed(1)} cm</span>
+              <span>Score W/L/H: {(droneScoringProxyBounds.size.x * 100).toFixed(1)} / {(droneScoringProxyBounds.size.z * 100).toFixed(1)} / {(droneScoringProxyBounds.size.y * 100).toFixed(1)} cm</span>
             </>
           ) : null}
         </div>
@@ -1412,7 +1374,7 @@ export function FieldViewport() {
         shadows
         gl={{ antialias: true, alpha: true }}
         onPointerMissed={() => {
-          if (!dragState && !transformDragging) {
+          if (!dragState) {
             selectObject(null)
           }
         }}
@@ -1422,15 +1384,9 @@ export function FieldViewport() {
           selectedObjectId={selectedObjectId}
           onSelectObject={selectObject}
           dragState={dragState}
-          transformState={transformState}
-          transformMode={transformMode}
-          transformDragging={transformDragging}
           snapToGrid={snapToGrid}
           onStartDrag={handleStartDrag}
           onPreviewDrag={handlePreviewDrag}
-          onPreviewTransform={setTransformState}
-          onTransformDragStateChange={setTransformDragging}
-          onCommitTransform={handleCommitTransform}
           plannedDrone={plannedDrone}
           plannedHeading={plannedHeading}
           plannedPitch={plannedPitch}
@@ -1442,9 +1398,11 @@ export function FieldViewport() {
           plannedPath={plannedPath}
           actualPath={actualPath}
           failureMarkers={run?.failureMarkers ?? []}
+          collisionEvents={run?.collisionEvents ?? []}
           dynamicObjectPositions={dynamicObjectPositions}
           dynamicObjectTransforms={dynamicObjectTransforms}
           sceneMode={workspaceMode === 'scene'}
+          physicsDebugEnabled={physicsDebugEnabled}
         />
       </Canvas>
 
@@ -1503,34 +1461,11 @@ export function FieldViewport() {
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3" role="group" aria-label="Object transform mode">
-          <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">Transform</span>
-          <button
-            type="button"
-            className={transformMode === 'translate' ? activeToolbarButtonClass : toolbarButtonClass}
-            onClick={() => setTransformMode('translate')}
-          >
-            Move
-          </button>
-          <button
-            type="button"
-            className={transformMode === 'rotate' ? activeToolbarButtonClass : toolbarButtonClass}
-            onClick={() => setTransformMode('rotate')}
-          >
-            Rotate
-          </button>
-          <button
-            type="button"
-            className={transformMode === 'scale' ? activeToolbarButtonClass : toolbarButtonClass}
-            onClick={() => setTransformMode('scale')}
-          >
-            Size
-          </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">Object Edit</span>
           <span className="text-sm text-slate-400">
             {selectedObject
-              ? transformDragging
-                ? `Editing ${selectedObject.name}`
-                : `${selectedObject.name} selected`
+              ? `${selectedObject.name} selected · drag to move · Shift = X only · Ctrl = Z only · ↑↓ height`
               : 'No object selected'}
           </span>
         </div>

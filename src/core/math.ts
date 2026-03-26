@@ -1,4 +1,5 @@
 import { DRONE_COLLIDER_HALF_EXTENTS_CM } from './constants'
+import { Euler, Quaternion, Vector3 as ThreeVector3 } from 'three'
 import type {
   DronePose,
   FieldObject,
@@ -122,19 +123,62 @@ export function getObjectContactThreshold(object: FieldObject): number {
     case 'marker':
       return 24
     default:
-      return Math.max(object.size.x, object.size.z) * 0.5
+  return Math.max(object.size.x, object.size.z) * 0.5
+  }
+}
+
+function toLocalPoint(point: Vector3, object: FieldObject): Vector3 {
+  const quaternion = new Quaternion().setFromEuler(
+    new Euler(
+      degreesToRadians(object.rotation.x),
+      degreesToRadians(object.rotation.y),
+      degreesToRadians(object.rotation.z),
+      'XYZ',
+    ),
+  ).invert()
+  const vector = new ThreeVector3(
+    point.x - object.position.x,
+    point.y - object.position.y,
+    point.z - object.position.z,
+  )
+  vector.applyQuaternion(quaternion)
+  return {
+    x: vector.x,
+    y: vector.y,
+    z: vector.z,
+  }
+}
+
+function toWorldPoint(localPoint: Vector3, object: FieldObject): Vector3 {
+  const quaternion = new Quaternion().setFromEuler(
+    new Euler(
+      degreesToRadians(object.rotation.x),
+      degreesToRadians(object.rotation.y),
+      degreesToRadians(object.rotation.z),
+      'XYZ',
+    ),
+  )
+  const vector = new ThreeVector3(localPoint.x, localPoint.y, localPoint.z)
+  vector.applyQuaternion(quaternion)
+  vector.add(new ThreeVector3(object.position.x, object.position.y, object.position.z))
+  return {
+    x: vector.x,
+    y: vector.y,
+    z: vector.z,
   }
 }
 
 function pointInsideExpandedBox(point: Vector3, object: FieldObject, padding: Vector3): boolean {
+  const localPoint = toLocalPoint(point, object)
   return (
-    Math.abs(point.x - object.position.x) <= object.size.x * 0.5 + padding.x &&
-    Math.abs(point.y - object.position.y) <= object.size.y * 0.5 + padding.y &&
-    Math.abs(point.z - object.position.z) <= object.size.z * 0.5 + padding.z
+    Math.abs(localPoint.x) <= object.size.x * 0.5 + padding.x &&
+    Math.abs(localPoint.y) <= object.size.y * 0.5 + padding.y &&
+    Math.abs(localPoint.z) <= object.size.z * 0.5 + padding.z
   )
 }
 
 export function pointInsideObject(point: Vector3, object: FieldObject): boolean {
+  const localPoint = toLocalPoint(point, object)
   if (
     object.type === 'landingZone' ||
     object.type === 'landingPad' ||
@@ -142,63 +186,60 @@ export function pointInsideObject(point: Vector3, object: FieldObject): boolean 
     object.type === 'colorMat'
   ) {
     const horizontalDistance = Math.hypot(
-      point.x - object.position.x,
-      point.z - object.position.z,
+      localPoint.x,
+      localPoint.z,
     )
     return (
       horizontalDistance <= getObjectContactThreshold(object) &&
-      Math.abs(point.y - object.position.y) <= object.size.y + 20
+      Math.abs(localPoint.y) <= object.size.y + 20
     )
   }
 
   if (object.type === 'ring') {
-    const horizontalDistance = Math.hypot(
-      point.x - object.position.x,
-      point.z - object.position.z,
-    )
+    const horizontalDistance = Math.hypot(localPoint.x, localPoint.z)
     return (
       horizontalDistance <= object.size.x * 0.36 &&
-      Math.abs(point.y - object.position.y) <= object.size.y * 0.36
+      Math.abs(localPoint.y) <= object.size.y * 0.36
     )
   }
 
   if (object.type === 'gate') {
     return (
-      Math.abs(point.x - object.position.x) <= object.size.x * 0.42 &&
-      Math.abs(point.y - object.position.y) <= object.size.y * 0.42 &&
-      Math.abs(point.z - object.position.z) <= Math.max(object.size.z * 0.8, 18)
+      Math.abs(localPoint.x) <= object.size.x * 0.42 &&
+      Math.abs(localPoint.y) <= object.size.y * 0.42 &&
+      Math.abs(localPoint.z) <= Math.max(object.size.z * 0.8, 18)
     )
   }
 
   if (object.type === 'keyholeGate') {
-    const horizontalDistance = Math.hypot(point.x - object.position.x, point.y - object.position.y)
+    const horizontalDistance = Math.hypot(localPoint.x, localPoint.y)
     return (
       horizontalDistance <= (object.metadata?.innerDiameterCm ?? object.size.x * 0.82) * 0.5 &&
-      Math.abs(point.z - object.position.z) <= Math.max(object.size.z * 0.8, 18)
+      Math.abs(localPoint.z) <= Math.max(object.size.z * 0.8, 18)
     )
   }
 
   if (object.type === 'archGate' || object.type === 'miniArchGate') {
     return (
-      Math.abs(point.x - object.position.x) <= (object.metadata?.innerWidthCm ?? object.size.x * 0.72) * 0.5 &&
-      point.y <= object.position.y + (object.metadata?.innerHeightCm ?? object.size.y * 0.72) * 0.5 &&
-      point.y >= 0 &&
-      Math.abs(point.z - object.position.z) <= Math.max((object.metadata?.outerDepthCm ?? object.size.z) * 0.8, 18)
+      Math.abs(localPoint.x) <= (object.metadata?.innerWidthCm ?? object.size.x * 0.72) * 0.5 &&
+      localPoint.y <= (object.metadata?.innerHeightCm ?? object.size.y * 0.72) * 0.5 &&
+      localPoint.y >= -object.position.y &&
+      Math.abs(localPoint.z) <= Math.max((object.metadata?.outerDepthCm ?? object.size.z) * 0.8, 18)
     )
   }
 
   if (object.type === 'tunnel') {
-    const radial = Math.hypot(point.y - object.position.y, point.z - object.position.z)
+    const radial = Math.hypot(localPoint.y, localPoint.z)
     return (
       radial <= (object.metadata?.innerDiameterCm ?? object.size.y) * 0.5 &&
-      Math.abs(point.x - object.position.x) <= (object.metadata?.tunnelLengthCm ?? object.size.x) * 0.5
+      Math.abs(localPoint.x) <= (object.metadata?.tunnelLengthCm ?? object.size.x) * 0.5
     )
   }
 
   if (object.type === 'flyThroughPanel') {
-    const localX = point.x - object.position.x
-    const localY = point.y - object.position.y
-    const localZ = Math.abs(point.z - object.position.z)
+    const localX = localPoint.x
+    const localY = localPoint.y
+    const localZ = Math.abs(localPoint.z)
     const sectionWidth = object.metadata?.sectionWidthCm ?? object.size.x / 3
     const centerSectionX = clamp(localX + object.size.x * 0.5, 0, object.size.x)
     const sectionIndex = Math.floor(centerSectionX / sectionWidth)
@@ -220,13 +261,61 @@ export function pointInsideSolidObject(point: Vector3, object: FieldObject): boo
 
 export function distanceToObject(point: Vector3, object: FieldObject): number {
   if (object.type === 'wall' || object.type === 'boundary' || object.isSolid) {
-    const deltaX = Math.max(Math.abs(point.x - object.position.x) - object.size.x * 0.5, 0)
-    const deltaY = Math.max(Math.abs(point.y - object.position.y) - object.size.y * 0.5, 0)
-    const deltaZ = Math.max(Math.abs(point.z - object.position.z) - object.size.z * 0.5, 0)
+    const localPoint = toLocalPoint(point, object)
+    const deltaX = Math.max(Math.abs(localPoint.x) - object.size.x * 0.5, 0)
+    const deltaY = Math.max(Math.abs(localPoint.y) - object.size.y * 0.5, 0)
+    const deltaZ = Math.max(Math.abs(localPoint.z) - object.size.z * 0.5, 0)
     return Math.hypot(deltaX, deltaY, deltaZ)
   }
 
   return Math.max(0, distanceBetween(point, object.position) - getObjectContactThreshold(object))
+}
+
+export function projectPointToObjectSurface(point: Vector3, object: FieldObject): Vector3 {
+  const localPoint = toLocalPoint(point, object)
+
+  if (object.type === 'wall' || object.type === 'boundary' || object.isSolid) {
+    const halfX = object.size.x * 0.5
+    const halfY = object.size.y * 0.5
+    const halfZ = object.size.z * 0.5
+    const distances = [
+      { axis: 'x' as const, value: halfX - Math.abs(localPoint.x) },
+      { axis: 'y' as const, value: halfY - Math.abs(localPoint.y) },
+      { axis: 'z' as const, value: halfZ - Math.abs(localPoint.z) },
+    ]
+    const nearestFace = distances.reduce((nearest, candidate) =>
+      candidate.value < nearest.value ? candidate : nearest,
+    )
+    const surfacePoint = {
+      x: clamp(localPoint.x, -halfX, halfX),
+      y: clamp(localPoint.y, -halfY, halfY),
+      z: clamp(localPoint.z, -halfZ, halfZ),
+    }
+    surfacePoint[nearestFace.axis] =
+      (surfacePoint[nearestFace.axis] >= 0 ? 1 : -1) *
+      (nearestFace.axis === 'x' ? halfX : nearestFace.axis === 'y' ? halfY : halfZ)
+    return toWorldPoint(surfacePoint, object)
+  }
+
+  if (
+    object.type === 'landingZone' ||
+    object.type === 'landingPad' ||
+    object.type === 'scoringZone' ||
+    object.type === 'colorMat'
+  ) {
+    const radius = getObjectContactThreshold(object)
+    const radial = Math.hypot(localPoint.x, localPoint.z) || 0.0001
+    return toWorldPoint(
+      {
+        x: (localPoint.x / radial) * Math.min(radial, radius),
+        y: clamp(localPoint.y, -object.size.y * 0.5, object.size.y * 0.5),
+        z: (localPoint.z / radial) * Math.min(radial, radius),
+      },
+      object,
+    )
+  }
+
+  return point
 }
 
 export function checkpointSatisfied(

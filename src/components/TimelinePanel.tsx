@@ -279,6 +279,7 @@ export function TimelinePanel() {
     invertInstruction,
     duplicateInstruction,
     deleteInstruction,
+    physicsDebugEnabled,
   } = useProjectStore(
     useShallow((state) => ({
       project: state.project,
@@ -296,6 +297,7 @@ export function TimelinePanel() {
       invertInstruction: state.invertInstruction,
       duplicateInstruction: state.duplicateInstruction,
       deleteInstruction: state.deleteInstruction,
+      physicsDebugEnabled: state.physicsDebugEnabled,
     })),
   )
 
@@ -752,12 +754,21 @@ export function TimelinePanel() {
                       <span
                         className={`block h-3 w-3 rounded-full ${
                           marker.type === 'collision'
-                            ? 'bg-rose-400'
+                            ? marker.severity === 'hard'
+                              ? 'bg-rose-500'
+                              : marker.severity === 'bump'
+                                ? 'bg-orange-400'
+                                : 'bg-amber-300'
                             : marker.type === 'checkpoint'
                               ? 'bg-violet-300'
                               : 'bg-amber-300'
                         }`}
                       />
+                      {physicsDebugEnabled && marker.type === 'collision' && marker.rawContactCount ? (
+                        <span className="absolute left-1/2 top-4 -translate-x-1/2 text-[9px] font-semibold text-slate-300">
+                          {marker.rawContactCount}
+                        </span>
+                      ) : null}
                     </div>
                   )
                 })}

@@ -2,22 +2,22 @@ import { Body, Box, ContactMaterial, Material, Plane, Quaternion, Sphere, Vec3, 
 
 import {
   AIR_DENSITY_KG_M3,
-  DRONE_ARM_X_BOX_WORLD,
-  DRONE_ARM_Z_BOX_WORLD,
-  DRONE_BODY_BOX_WORLD,
-  DRONE_TOP_BOX_WORLD,
   DRONE_DRAG_COEFFICIENT,
   DRONE_FRONTAL_AREA_M2,
   DRONE_COLLIDER_HALF_EXTENTS_CM,
   DRONE_MAX_SPEED_MPS,
-  DRONE_MOTOR_OFFSETS_WORLD,
-  DRONE_MOTOR_RADIUS_WORLD,
   DRONE_PLANFORM_AREA_M2,
   DRONE_ROTOR_RADIUS_M,
   MONTE_CARLO_RUNS,
   PHYSICS_SETTLE_SECONDS,
   PHYSICS_STEP_SECONDS,
 } from '../constants'
+import {
+  classifyDroneContactType,
+  DRONE_PHYSICS_PROXY_COMPONENTS,
+  type DroneProxyContactType,
+  toDroneLocalPoint,
+} from '../droneCollision'
 import { createId } from '../id'
 import {
   checkpointSatisfied,
@@ -29,6 +29,7 @@ import {
   headingVector,
   lerp,
   normalizeHeading,
+  projectPointToObjectSurface,
   resolveLandingSurface,
   signedNoise,
   strafeVector,
@@ -38,6 +39,7 @@ import { addPhysicsBody, applyBodyForce, createPhysicsWorld, getBodyState, stepP
 import type {
   BehaviorProfile,
   CheckpointResult,
+  CollisionEvent,
   DeepAnalysisResult,
   FailureMarker,
   FieldLayout,
@@ -80,6 +82,8 @@ interface DroneSimState {
   isCoasting: boolean
   wasCommandingHorizontal: boolean
   collisionAftershock: number
+  maxPostCollisionVerticalVelocity: number | null
+  collisionSurfaceNormal: Vector3 | null
 }
 
 interface DraftObjectBody {
@@ -94,6 +98,37 @@ interface SimWorldContext {
   collidableObjects: FieldObject[]
   obstacleBodyIds: Map<number, string>
   draftBodies: DraftObjectBody[]
+}
+
+type CollisionSeverity = 'brush' | 'bump' | 'hard'
+
+interface ActiveCollisionEvent {
+  eventId: string
+  objectId: string
+  objectName: string
+  instructionId: string
+  segmentId: string
+  firstContactTime: number
+  lastContactTime: number
+  contactCount: number
+  rawContactCount: number
+  peakSpeed: number
+  maxApproach: number
+  peakContactCount: number
+  representativeContactPoint: Vector3
+  representativeNormal: Vector3
+  contactType: DroneProxyContactType
+}
+
+interface CollisionContactCluster {
+  objectId: string
+  rawContactCount: number
+  peakSpeed: number
+  maxApproach: number
+  peakContactCount: number
+  representativeContactPoint: Vector3
+  representativeNormal: Vector3
+  contactType: DroneProxyContactType
 }
 
 interface ControlIntent {
@@ -122,6 +157,18 @@ const STEP_NOISE_RESPONSE = 2.6
 const STEP_NOISE_SPEED_SCALE = 0.08
 const STEP_NOISE_YAW_SCALE = 12
 const STEP_NOISE_VERTICAL_SCALE = 0.09
+const COLLISION_COOLDOWN_SECONDS = 1.1
+const COLLISION_MERGE_DISTANCE_CM = 16
+const COLLISION_AFTERSHOCK_MULTIPLIER: Record<CollisionSeverity, number> = {
+  brush: 0.65,
+  bump: 1,
+  hard: 1.45,
+}
+const COLLISION_PUSH_SCALE: Record<CollisionSeverity, number> = {
+  brush: 0.08,
+  bump: 0.16,
+  hard: 0.26,
+}
 
 function toMeters(valueInCentimeters: number): number {
   return valueInCentimeters / 100
@@ -199,46 +246,23 @@ function setBodyToYawOnly(body: Body, heading: number): void {
 }
 
 function addDroneCollider(body: Body) {
-  body.addShape(
-    new Box(
-      new Vec3(
-        DRONE_BODY_BOX_WORLD.x * 0.5,
-        DRONE_BODY_BOX_WORLD.y * 0.5,
-        DRONE_BODY_BOX_WORLD.z * 0.5,
-      ),
-    ),
-  )
-  body.addShape(
-    new Box(
-      new Vec3(
-        DRONE_TOP_BOX_WORLD.x * 0.5,
-        DRONE_TOP_BOX_WORLD.y * 0.5,
-        DRONE_TOP_BOX_WORLD.z * 0.5,
-      ),
-    ),
-    new Vec3(0, 0.011, 0),
-  )
-  body.addShape(
-    new Box(
-      new Vec3(
-        DRONE_ARM_X_BOX_WORLD.x * 0.5,
-        DRONE_ARM_X_BOX_WORLD.y * 0.5,
-        DRONE_ARM_X_BOX_WORLD.z * 0.5,
-      ),
-    ),
-  )
-  body.addShape(
-    new Box(
-      new Vec3(
-        DRONE_ARM_Z_BOX_WORLD.x * 0.5,
-        DRONE_ARM_Z_BOX_WORLD.y * 0.5,
-        DRONE_ARM_Z_BOX_WORLD.z * 0.5,
-      ),
-    ),
-  )
+  for (const component of DRONE_PHYSICS_PROXY_COMPONENTS) {
+    const offset = new Vec3(component.offset.x, component.offset.y, component.offset.z)
+    if (component.shape === 'sphere') {
+      body.addShape(new Sphere(component.radius ?? 0), offset)
+      continue
+    }
 
-  for (const [x, y, z] of DRONE_MOTOR_OFFSETS_WORLD) {
-    body.addShape(new Sphere(DRONE_MOTOR_RADIUS_WORLD), new Vec3(x, y, z))
+    body.addShape(
+      new Box(
+        new Vec3(
+          (component.size?.x ?? 0) * 0.5,
+          (component.size?.y ?? 0) * 0.5,
+          (component.size?.z ?? 0) * 0.5,
+        ),
+      ),
+      offset,
+    )
   }
 }
 
@@ -611,6 +635,10 @@ function applyDroneControl(
   const headingResponse = clamp(profile.turnResponsePct * 10 * profile.attitudeHoldGain, 3.5, 16)
   const isAirborne = state.body.position.y > 0.05 || state.holdAltitudeMeters > 0.08
   state.collisionAftershock = Math.max(state.collisionAftershock - dt, 0)
+  if (state.collisionAftershock <= 0) {
+    state.maxPostCollisionVerticalVelocity = null
+    state.collisionSurfaceNormal = null
+  }
   const aftershockPct =
     COLLISION_AFTERSHOCK_SECONDS > 0
       ? clamp(state.collisionAftershock / COLLISION_AFTERSHOCK_SECONDS, 0, 1)
@@ -865,6 +893,22 @@ function applyDroneControl(
   desiredHorizontalMps.x += state.disturbanceHorizontal.x
   desiredHorizontalMps.z += state.disturbanceHorizontal.z
 
+  if (aftershockPct > 0 && state.collisionSurfaceNormal) {
+    const horizontalCollisionNormal = normalizeVector({
+      x: state.collisionSurfaceNormal.x,
+      y: 0,
+      z: state.collisionSurfaceNormal.z,
+    })
+    const intoSurfaceVelocity =
+      desiredHorizontalMps.x * horizontalCollisionNormal.x +
+      desiredHorizontalMps.z * horizontalCollisionNormal.z
+    if (intoSurfaceVelocity < 0) {
+      const removalStrength = clamp(0.82 + aftershockPct * 0.3, 0, 1.08)
+      desiredHorizontalMps.x -= horizontalCollisionNormal.x * intoSurfaceVelocity * removalStrength
+      desiredHorizontalMps.z -= horizontalCollisionNormal.z * intoSurfaceVelocity * removalStrength
+    }
+  }
+
   const groundEffectGain = getGroundEffectGain(state.body.position.y)
   const dirtyAirFactor = getDirtyAirFactor(currentVelocity.y, horizontalSpeed) * (intent.autoHover ? 0.18 : 1)
   const dirtyAirSway = dirtyAirFactor * (0.02 + profile.propWashStrength * 0.035)
@@ -909,7 +953,7 @@ function applyDroneControl(
     massKg *
     dirtyAirSway *
     Math.cos(time * 2.3 + seed * 0.17)
-  const desiredVerticalVelocity = clamp(
+  let desiredVerticalVelocity = clamp(
     toMeters(intent.verticalRateCmS) * speedScale +
       (state.holdAltitudeMeters - state.body.position.y) * clamp(profile.altitudeHoldGain, 2.4, 9) -
       dirtyAirFactor * 0.22 +
@@ -917,6 +961,14 @@ function applyDroneControl(
     -1.8,
     1.8,
   )
+  if (
+    aftershockPct > 0 &&
+    state.collisionSurfaceNormal &&
+    Math.abs(state.collisionSurfaceNormal.y) < 0.45
+  ) {
+    const cappedRecoveryVelocity = 0.06 + (1 - aftershockPct) * 0.05
+    desiredVerticalVelocity = Math.min(desiredVerticalVelocity, cappedRecoveryVelocity)
+  }
   const verticalResponse = clamp(5.8 * profile.altitudeHoldGain / 5.8, 3.4, 9.4)
   const desiredVerticalAcceleration = clamp(
     (desiredVerticalVelocity - currentVelocity.y) * verticalResponse,
@@ -997,6 +1049,9 @@ function applyDroneControl(
     state.body.velocity.z *= scale
   }
   state.body.velocity.y = clamp(state.body.velocity.y, -DRONE_MAX_SPEED_MPS * 0.82, DRONE_MAX_SPEED_MPS * 0.82)
+  if (state.maxPostCollisionVerticalVelocity !== null) {
+    state.body.velocity.y = Math.min(state.body.velocity.y, state.maxPostCollisionVerticalVelocity)
+  }
   state.body.angularVelocity.x = 0
   state.body.angularVelocity.y = 0
   state.body.angularVelocity.z = 0
@@ -1158,6 +1213,127 @@ function buildLandingResult(
   }
 }
 
+function classifyCollisionSeverity(
+  peakSpeed: number,
+  durationSeconds: number,
+  rawContactCount: number,
+  peakContactCount: number,
+  maxApproach: number,
+): CollisionSeverity {
+  const severityScore =
+    peakSpeed * 0.016 +
+    durationSeconds * 22 +
+    rawContactCount * 0.45 +
+    peakContactCount * 1.1 +
+    maxApproach * 16
+
+  if (severityScore >= 10.8) {
+    return 'hard'
+  }
+  if (severityScore >= 5.4) {
+    return 'bump'
+  }
+  return 'brush'
+}
+
+function buildCollisionMessage(
+  severity: CollisionSeverity,
+  objectName: string,
+  rawContactCount: number,
+  contactType: DroneProxyContactType,
+): string {
+  const label =
+    severity === 'hard'
+      ? 'Hard collision'
+      : severity === 'bump'
+        ? 'Collision bump'
+        : 'Collision brush'
+  return `${label} with ${objectName} (${contactType}, ${rawContactCount} raw contacts).`
+}
+
+function normalizeVector(vector: Vector3, fallback: Vector3 = { x: 0, y: 0, z: 1 }): Vector3 {
+  const magnitude = Math.hypot(vector.x, vector.y, vector.z)
+  if (magnitude <= 0.0001) {
+    return fallback
+  }
+  return {
+    x: vector.x / magnitude,
+    y: vector.y / magnitude,
+    z: vector.z / magnitude,
+  }
+}
+
+function averageVector(points: Vector3[]): Vector3 {
+  if (points.length === 0) {
+    return { x: 0, y: 0, z: 0 }
+  }
+  const total = points.reduce(
+    (sum, point) => ({
+      x: sum.x + point.x,
+      y: sum.y + point.y,
+      z: sum.z + point.z,
+    }),
+    { x: 0, y: 0, z: 0 },
+  )
+  return {
+    x: total.x / points.length,
+    y: total.y / points.length,
+    z: total.z / points.length,
+  }
+}
+
+function mergeRepresentativeNormal(current: Vector3, next: Vector3): Vector3 {
+  return normalizeVector({
+    x: current.x + next.x,
+    y: current.y + next.y,
+    z: current.z + next.z,
+  })
+}
+
+function applyCollisionAftermath(
+  state: DroneSimState,
+  severity: CollisionSeverity,
+  contactNormal: Vector3,
+): void {
+  const velocity = {
+    x: state.body.velocity.x,
+    y: state.body.velocity.y,
+    z: state.body.velocity.z,
+  }
+  const normal = normalizeVector(contactNormal, {
+    x: -Math.cos(degreesToRadians(state.heading)),
+    y: 0,
+    z: -Math.sin(degreesToRadians(state.heading)),
+  })
+  const normalVelocity =
+    velocity.x * normal.x + velocity.y * normal.y + velocity.z * normal.z
+  const tangentVelocity = {
+    x: velocity.x - normal.x * normalVelocity,
+    y: velocity.y - normal.y * normalVelocity,
+    z: velocity.z - normal.z * normalVelocity,
+  }
+  const tangentRetain = severity === 'hard' ? 0.62 : severity === 'bump' ? 0.76 : 0.9
+  const outwardBounce = Math.max(-normalVelocity, 0) * (severity === 'hard' ? 0.14 : 0.08)
+  const nextVelocity = {
+    x: tangentVelocity.x * tangentRetain + normal.x * outwardBounce,
+    y: tangentVelocity.y * tangentRetain + normal.y * outwardBounce,
+    z: tangentVelocity.z * tangentRetain + normal.z * outwardBounce,
+  }
+
+  if (normal.y < 0.45) {
+    const upwardVelocityLimit =
+      severity === 'hard' ? 0.16 : severity === 'bump' ? 0.12 : 0.08
+    const cappedVerticalVelocity = Math.min(velocity.y, upwardVelocityLimit)
+    state.maxPostCollisionVerticalVelocity = cappedVerticalVelocity
+    nextVelocity.y = Math.min(nextVelocity.y, cappedVerticalVelocity)
+  } else {
+    state.maxPostCollisionVerticalVelocity = null
+  }
+
+  state.collisionSurfaceNormal = normal
+  state.body.velocity.set(nextVelocity.x, nextVelocity.y, nextVelocity.z)
+}
+
 function buildPose(position: Vector3, heading: number, airborne: boolean) {
   return {
     position,
@@ -1185,6 +1361,7 @@ function simulateCore(
       segments: [],
       trace: [],
       failureMarkers: [],
+      collisionEvents: [],
       checkpointResults: [],
       completedCheckpointIds: [],
       skippedCheckpointIds: [],
@@ -1221,6 +1398,16 @@ function simulateCore(
           message: 'No landing required.',
         },
       },
+      solveSummary: {
+        seed,
+        physicsSteps: 0,
+        tracePoints: 0,
+        checkpointChecks: 0,
+        monteCarloRuns: 0,
+        solveTimeMs: 0,
+        averageNoiseMagnitude: 0,
+        driftAccumulation: 0,
+      },
     }
   }
 
@@ -1233,6 +1420,7 @@ function simulateCore(
   const missionCheckpoints = getMissionCheckpoints(fieldLayout)
   const checkpointResults = createCheckpointResults(missionCheckpoints, fieldLayout.objects)
   const failureMarkers: FailureMarker[] = []
+  const collisionEvents: CollisionEvent[] = []
   const trace: SimulationTracePoint[] = []
   const collisionIds = new Set<string>()
   const contactedObjectIds = new Set<string>()
@@ -1261,6 +1449,8 @@ function simulateCore(
     isCoasting: false,
     wasCommandingHorizontal: false,
     collisionAftershock: 0,
+    maxPostCollisionVerticalVelocity: null,
+    collisionSurfaceNormal: null,
   }
   const plannedState: DroneSimState = {
     body: plannedWorld.body,
@@ -1280,6 +1470,8 @@ function simulateCore(
     isCoasting: false,
     wasCommandingHorizontal: false,
     collisionAftershock: 0,
+    maxPostCollisionVerticalVelocity: null,
+    collisionSurfaceNormal: null,
   }
 
   const plannedPointsBySegment = new Map<string, Vector3[]>()
@@ -1293,12 +1485,12 @@ function simulateCore(
   let expectedCheckpointIndex = 0
   let actualContactSet = new Set<string>()
   let plannedContactSet = new Set<string>()
-  let actualCollisionSet = new Set<string>()
   let physicsSteps = 0
   let checkpointChecks = 0
   let accumulatedNoiseMagnitude = 0
   let accumulatedDrift = 0
   let driftSamples = 0
+  const activeCollisionEvents = new Map<string, ActiveCollisionEvent>()
   let landingResult: LandingResult = {
     surface: 'none',
     objectId: null,
@@ -1310,6 +1502,61 @@ function simulateCore(
   const totalTime =
     Math.max(actualWindows.at(-1)?.end ?? 0, plannedWindows.at(-1)?.end ?? 0) +
     PHYSICS_SETTLE_SECONDS
+
+  const finalizeCollisionEvent = (event: ActiveCollisionEvent) => {
+    const durationSeconds = Math.max(event.lastContactTime - event.firstContactTime, 0)
+    const severity = classifyCollisionSeverity(
+      event.peakSpeed,
+      durationSeconds,
+      event.rawContactCount,
+      event.peakContactCount,
+      event.maxApproach,
+    )
+    const contactType =
+      severity === 'hard' && event.contactType === 'bodyHit'
+        ? 'hardStop'
+        : event.contactType
+    collisionEvents.push({
+      id: event.eventId,
+      objectId: event.objectId,
+      objectName: event.objectName,
+      instructionId: event.instructionId,
+      segmentId: event.segmentId,
+      firstContactTime: event.firstContactTime,
+      lastContactTime: event.lastContactTime,
+      contactCount: event.contactCount,
+      rawContactCount: event.rawContactCount,
+      severity,
+      peakSpeed: event.peakSpeed,
+      position: event.representativeContactPoint,
+      representativeContactPoint: event.representativeContactPoint,
+      representativeNormal: event.representativeNormal,
+      contactType,
+    })
+    failureMarkers.push(
+      buildFailureMarker(
+        event.instructionId,
+        'collision',
+        buildCollisionMessage(severity, event.objectName, event.rawContactCount, contactType),
+        event.representativeContactPoint,
+        event.firstContactTime,
+        {
+          severity,
+          rawContactCount: event.rawContactCount,
+          contactType,
+          normal: event.representativeNormal,
+        },
+      ),
+    )
+    if (event.segmentId) {
+      getOrCreateSet(collisionsBySegment, event.segmentId).add(event.objectId)
+      if (severity === 'hard') {
+        getOrCreateSet(riskFlagsBySegment, event.segmentId).add('Hard collision event')
+      } else if (severity === 'bump') {
+        getOrCreateSet(riskFlagsBySegment, event.segmentId).add('Moderate collision event')
+      }
+    }
+  }
 
   for (let time = 0; time <= totalTime + 0.0001; time += PHYSICS_STEP_SECONDS) {
     physicsSteps += 1
@@ -1481,43 +1728,256 @@ function simulateCore(
       expectedCheckpointIndex = Math.max(expectedCheckpointIndex, checkpointIndex + 1)
     }
 
-    const currentCollisions = new Set<string>()
+    const currentCollisionContacts = new Map<string, CollisionContactCluster>()
     for (const contact of actualWorld.world.contacts) {
-      const bodyA = contact.bi.id === actualState.body.id ? contact.bj.id : null
-      const bodyB = contact.bj.id === actualState.body.id ? contact.bi.id : null
-      const obstacleId =
-        (bodyA ? actualWorld.obstacleBodyIds.get(bodyA) : undefined) ??
-        (bodyB ? actualWorld.obstacleBodyIds.get(bodyB) : undefined)
-      if (obstacleId) {
-        currentCollisions.add(obstacleId)
-      }
-    }
-
-    for (const collisionId of currentCollisions) {
-      if (actualCollisionSet.has(collisionId)) {
+      const droneIsBodyA = contact.bi.id === actualState.body.id
+      const droneIsBodyB = contact.bj.id === actualState.body.id
+      if (!droneIsBodyA && !droneIsBodyB) {
         continue
       }
 
-      actualState.collisionAftershock = Math.max(
-        actualState.collisionAftershock,
-        COLLISION_AFTERSHOCK_SECONDS,
-      )
-      collisionIds.add(collisionId)
-      if (actualIntent.primarySegmentId) {
-        getOrCreateSet(collisionsBySegment, actualIntent.primarySegmentId).add(collisionId)
+      const obstacleBodyId = droneIsBodyA ? contact.bj.id : contact.bi.id
+      const obstacleId = actualWorld.obstacleBodyIds.get(obstacleBodyId)
+      if (!obstacleId) {
+        continue
       }
 
-      const object = collidableObjects.find((candidate) => candidate.id === collisionId)
-      if (object) {
-        failureMarkers.push(
-          buildFailureMarker(
-            actualIntent.primaryInstructionId,
-            'collision',
-            `Route contact with ${object.name}.`,
-            actualPosition,
-            time,
-          ),
+      const object = collidableObjects.find((candidate) => candidate.id === obstacleId)
+      if (!object) {
+        continue
+      }
+
+      const dronePointMeters = droneIsBodyA
+        ? {
+            x: actualState.body.position.x + contact.ri.x,
+            y: actualState.body.position.y + contact.ri.y,
+            z: actualState.body.position.z + contact.ri.z,
+          }
+        : {
+            x: actualState.body.position.x + contact.rj.x,
+            y: actualState.body.position.y + contact.rj.y,
+            z: actualState.body.position.z + contact.rj.z,
+          }
+      const obstaclePointMeters = droneIsBodyA
+        ? {
+            x: contact.bj.position.x + contact.rj.x,
+            y: contact.bj.position.y + contact.rj.y,
+            z: contact.bj.position.z + contact.rj.z,
+          }
+        : {
+            x: contact.bi.position.x + contact.ri.x,
+            y: contact.bi.position.y + contact.ri.y,
+            z: contact.bi.position.z + contact.ri.z,
+          }
+      const rawObstacleContactPoint = vec3FromMeters(obstaclePointMeters as Vec3)
+      const refinedObstaclePoint = projectPointToObjectSurface(rawObstacleContactPoint, object)
+      const obstacleContactPoint =
+        distanceBetween(rawObstacleContactPoint, refinedObstaclePoint) > 10
+          ? refinedObstaclePoint
+          : rawObstacleContactPoint
+      const rawDroneContactPoint = {
+        x: toCentimeters(dronePointMeters.x),
+        y: toCentimeters(dronePointMeters.y),
+        z: toCentimeters(dronePointMeters.z),
+      }
+      const representativeContactPoint = averageVector([
+        rawDroneContactPoint,
+        obstacleContactPoint,
+      ])
+      const geometricNormal = normalizeVector({
+        x: rawDroneContactPoint.x - obstacleContactPoint.x,
+        y: rawDroneContactPoint.y - obstacleContactPoint.y,
+        z: rawDroneContactPoint.z - obstacleContactPoint.z,
+      })
+      const physicsNormal = normalizeVector(
+        droneIsBodyA
+          ? {
+              x: -contact.ni.x,
+              y: -contact.ni.y,
+              z: -contact.ni.z,
+            }
+          : {
+              x: contact.ni.x,
+              y: contact.ni.y,
+              z: contact.ni.z,
+            },
+        geometricNormal,
+      )
+      const representativeNormal = normalizeVector(
+        {
+          x: physicsNormal.x * 0.85 + geometricNormal.x * 0.15,
+          y: physicsNormal.y * 0.85 + geometricNormal.y * 0.15,
+          z: physicsNormal.z * 0.85 + geometricNormal.z * 0.15,
+        },
+        geometricNormal,
+      )
+      const droneLocalPoint = toDroneLocalPoint(
+        dronePointMeters as unknown as Vector3,
+        {
+          x: actualState.body.position.x,
+          y: actualState.body.position.y,
+          z: actualState.body.position.z,
+        },
+        actualState.heading,
+      )
+
+      const toObstacle = {
+        x: object.position.x - actualPosition.x,
+        y: object.position.y - actualPosition.y,
+        z: object.position.z - actualPosition.z,
+      }
+      const toObstacleLength = Math.hypot(toObstacle.x, toObstacle.y, toObstacle.z)
+      const bodyVelocityLength = Math.max(actualState.body.velocity.length(), 0.0001)
+      const velocityNorm = {
+        x: actualState.body.velocity.x / bodyVelocityLength,
+        y: actualState.body.velocity.y / bodyVelocityLength,
+        z: actualState.body.velocity.z / bodyVelocityLength,
+      }
+      const obstacleNorm =
+        toObstacleLength > 0.0001
+          ? {
+              x: toObstacle.x / toObstacleLength,
+              y: toObstacle.y / toObstacleLength,
+              z: toObstacle.z / toObstacleLength,
+            }
+          : { x: 0, y: 0, z: 0 }
+      const approach = Math.max(
+        0,
+        velocityNorm.x * obstacleNorm.x +
+          velocityNorm.y * obstacleNorm.y +
+          velocityNorm.z * obstacleNorm.z,
+      )
+
+      const existingCluster = currentCollisionContacts.get(obstacleId)
+      if (existingCluster) {
+        existingCluster.rawContactCount += 1
+        existingCluster.peakSpeed = Math.max(existingCluster.peakSpeed, actualSpeed)
+        existingCluster.maxApproach = Math.max(existingCluster.maxApproach, approach)
+        existingCluster.peakContactCount = Math.max(existingCluster.peakContactCount, existingCluster.rawContactCount)
+        existingCluster.representativeContactPoint = averageVector([
+          existingCluster.representativeContactPoint,
+          representativeContactPoint,
+        ])
+        existingCluster.representativeNormal = mergeRepresentativeNormal(
+          existingCluster.representativeNormal,
+          representativeNormal,
         )
+        if (existingCluster.contactType === 'bodyHit') {
+          existingCluster.contactType = classifyDroneContactType(
+            droneLocalPoint,
+            'bump',
+            approach,
+          )
+        }
+        continue
+      }
+
+      currentCollisionContacts.set(obstacleId, {
+        objectId: obstacleId,
+        rawContactCount: 1,
+        peakSpeed: actualSpeed,
+        maxApproach: approach,
+        peakContactCount: 1,
+        representativeContactPoint,
+        representativeNormal,
+        contactType: classifyDroneContactType(droneLocalPoint, 'brush', approach),
+      })
+    }
+
+    const currentCollisionIds = new Set(currentCollisionContacts.keys())
+    for (const [collisionId, cluster] of currentCollisionContacts) {
+      const object = collidableObjects.find((candidate) => candidate.id === collisionId)
+      if (!object) {
+        continue
+      }
+      const existingEvent = activeCollisionEvents.get(collisionId)
+      const mergeDistance = Math.max(
+        COLLISION_MERGE_DISTANCE_CM,
+        Math.max(object.size.x, object.size.z) * 0.4,
+      )
+      const canMerge =
+        existingEvent &&
+        (
+          time - existingEvent.lastContactTime <= COLLISION_COOLDOWN_SECONDS ||
+          (
+            time - existingEvent.lastContactTime <= COLLISION_COOLDOWN_SECONDS * 1.5 &&
+            distanceBetween(existingEvent.representativeContactPoint, cluster.representativeContactPoint) <=
+              mergeDistance
+          )
+        )
+
+      if (existingEvent && canMerge) {
+        existingEvent.lastContactTime = time
+        existingEvent.contactCount += 1
+        existingEvent.rawContactCount += cluster.rawContactCount
+        existingEvent.peakSpeed = Math.max(existingEvent.peakSpeed, cluster.peakSpeed)
+        existingEvent.maxApproach = Math.max(existingEvent.maxApproach, cluster.maxApproach)
+        existingEvent.peakContactCount = Math.max(existingEvent.peakContactCount, cluster.peakContactCount)
+        existingEvent.representativeContactPoint = averageVector([
+          existingEvent.representativeContactPoint,
+          cluster.representativeContactPoint,
+        ])
+        existingEvent.representativeNormal = mergeRepresentativeNormal(
+          existingEvent.representativeNormal,
+          cluster.representativeNormal,
+        )
+        if (existingEvent.contactType !== 'hardStop' && cluster.contactType === 'hardStop') {
+          existingEvent.contactType = 'hardStop'
+        } else if (existingEvent.contactType === 'bodyHit' && cluster.contactType !== 'bodyHit') {
+          existingEvent.contactType = cluster.contactType
+        }
+      } else {
+        if (existingEvent) {
+          finalizeCollisionEvent(existingEvent)
+        }
+
+        const severitySeed = classifyCollisionSeverity(
+          cluster.peakSpeed,
+          0,
+          cluster.rawContactCount,
+          cluster.peakContactCount,
+          cluster.maxApproach,
+        )
+        const pushScale = COLLISION_PUSH_SCALE[severitySeed]
+        applyCollisionAftermath(actualState, severitySeed, cluster.representativeNormal)
+        actualState.body.velocity.x += cluster.representativeNormal.x * pushScale
+        actualState.body.velocity.z += cluster.representativeNormal.z * pushScale
+        actualState.collisionAftershock = Math.max(
+          actualState.collisionAftershock,
+          COLLISION_AFTERSHOCK_SECONDS * COLLISION_AFTERSHOCK_MULTIPLIER[severitySeed],
+        )
+        collisionIds.add(collisionId)
+        activeCollisionEvents.set(collisionId, {
+          eventId: createId('collision'),
+          objectId: collisionId,
+          objectName: object.name,
+          instructionId: actualIntent.primaryInstructionId,
+          segmentId: actualIntent.primarySegmentId,
+          firstContactTime: time,
+          lastContactTime: time,
+          contactCount: 1,
+          rawContactCount: cluster.rawContactCount,
+          peakSpeed: cluster.peakSpeed,
+          maxApproach: cluster.maxApproach,
+          peakContactCount: cluster.peakContactCount,
+          representativeContactPoint: cluster.representativeContactPoint,
+          representativeNormal: cluster.representativeNormal,
+          contactType: cluster.contactType === 'grazingContact' && severitySeed !== 'brush'
+            ? 'armBrush'
+            : severitySeed === 'hard' && cluster.contactType === 'bodyHit'
+              ? 'hardStop'
+              : cluster.contactType,
+        })
+      }
+    }
+
+    for (const [collisionId, event] of [...activeCollisionEvents.entries()]) {
+      if (currentCollisionIds.has(collisionId)) {
+        continue
+      }
+      if (time - event.lastContactTime > COLLISION_COOLDOWN_SECONDS) {
+        finalizeCollisionEvent(event)
+        activeCollisionEvents.delete(collisionId)
       }
     }
 
@@ -1578,7 +2038,6 @@ function simulateCore(
 
     actualContactSet = actualCheckpointContacts
     plannedContactSet = plannedCheckpointContacts
-    actualCollisionSet = currentCollisions
   }
 
   for (let index = expectedCheckpointIndex; index < missionCheckpoints.length; index += 1) {
@@ -1605,6 +2064,11 @@ function simulateCore(
       ),
     )
   }
+
+  for (const event of activeCollisionEvents.values()) {
+    finalizeCollisionEvent(event)
+  }
+  activeCollisionEvents.clear()
 
   const includesLanding = plannedSegments.some((segment) => segment.kind === 'land')
   if (includesLanding) {
@@ -1699,7 +2163,7 @@ function simulateCore(
     }
   })
 
-  const collisionCount = segments.reduce((sum, segment) => sum + segment.collisions.length, 0)
+  const collisionCount = collisionEvents.length
   const checkpointHits = checkpointResults.filter((checkpoint) => checkpoint.status === 'hit').length
   const checkpointTargetCount = checkpointResults.filter((checkpoint) => checkpoint.required).length
   const turnCount = segments.filter(
@@ -1742,6 +2206,7 @@ function simulateCore(
     segments,
     trace,
     failureMarkers,
+    collisionEvents,
     checkpointResults,
     completedCheckpointIds: [...completedCheckpointIds],
     skippedCheckpointIds: [...skippedCheckpointIds],

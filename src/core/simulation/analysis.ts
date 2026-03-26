@@ -13,6 +13,7 @@ export function buildFailureMarker(
   message: string,
   position: FailureMarker['position'],
   time: number,
+  extras?: Pick<FailureMarker, 'severity' | 'rawContactCount' | 'contactType' | 'normal'>,
 ): FailureMarker {
   return {
     id: createId('failure'),
@@ -21,6 +22,7 @@ export function buildFailureMarker(
     message,
     position,
     time,
+    ...extras,
   }
 }
 

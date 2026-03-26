@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'vitest'
 
+import { DRONE_DIMENSIONS_WORLD } from '../constants'
+import { computeDroneProxyBounds, DRONE_SCORING_PROXY_COMPONENTS } from '../droneCollision'
 import { createStarterProject } from '../sampleProject'
 import { compileInstructionSequence } from './compile'
 import { simulateRoute } from './simulate'
+
+function collisionSeverityRank(severity: 'brush' | 'bump' | 'hard') {
+  switch (severity) {
+    case 'brush':
+      return 1
+    case 'bump':
+      return 2
+    case 'hard':
+      return 3
+  }
+}
 
 describe('simulateRoute', () => {
   it('is deterministic for the same seed', () => {
@@ -356,5 +369,249 @@ describe('simulateRoute', () => {
 
     expect(collisionRun.metrics.collisionCount).toBeGreaterThan(cleanRun.metrics.collisionCount)
     expect(collisionRun.metrics.pathDeviation).toBeGreaterThan(cleanRun.metrics.pathDeviation + 5)
+  })
+
+  it('dedupes repeated contact with the same object into one collision event during the cooldown window', () => {
+    const project = createStarterProject()
+    const layout = structuredClone(project.fieldLayouts[0])
+    layout.objects = [
+      {
+        id: 'gate-wall',
+        type: 'wall',
+        name: 'Gate Wall',
+        position: { x: -188, y: 55, z: -120 },
+        rotation: { x: 0, y: 0, z: 0 },
+        size: { x: 28, y: 110, z: 140 },
+        color: '#ff6b6b',
+        isSolid: true,
+        windResponsive: false,
+        note: '',
+      },
+    ]
+    layout.missionCheckpoints = []
+    const route = {
+      ...project.routeVersions[0],
+      instructions: [
+        { ...project.routeVersions[0].instructions[0], kind: 'takeoff' as const, delayAfter: 0.1 },
+        { ...project.routeVersions[0].instructions[1], kind: 'moveForward' as const, strength: 26, duration: 0.42, delayAfter: 0 },
+      ],
+    }
+    const profile = { ...project.behaviorProfiles[1], randomizeConditions: false }
+    const run = simulateRoute(compileInstructionSequence(route, layout.spawn), profile, layout, 51)
+    const wallEvents = run.collisionEvents.filter((event) => event.objectId === 'gate-wall')
+    const collisionMarkers = run.failureMarkers.filter((marker) => marker.type === 'collision')
+
+    expect(wallEvents.length).toBeLessThanOrEqual(2)
+    expect(wallEvents[0].rawContactCount).toBeGreaterThanOrEqual(wallEvents.length)
+    expect(collisionMarkers).toHaveLength(run.collisionEvents.length)
+  })
+
+  it('creates separate collision events when the same object is hit again after leaving contact', () => {
+    const project = createStarterProject()
+    const layout = structuredClone(project.fieldLayouts[0])
+    layout.objects = [
+      {
+        id: 'repeat-wall',
+        type: 'wall',
+        name: 'Repeat Wall',
+        position: { x: -182, y: 55, z: -120 },
+        rotation: { x: 0, y: 0, z: 0 },
+        size: { x: 10, y: 110, z: 120 },
+        color: '#ff6b6b',
+        isSolid: true,
+        windResponsive: false,
+        note: '',
+      },
+    ]
+    layout.missionCheckpoints = []
+    const route = {
+      ...project.routeVersions[0],
+      instructions: [
+        { ...project.routeVersions[0].instructions[0], kind: 'takeoff' as const, delayAfter: 0.1 },
+        { ...project.routeVersions[0].instructions[1], kind: 'moveForward' as const, strength: 50, duration: 0.7, delayAfter: 0.1 },
+        { ...project.routeVersions[0].instructions[1], kind: 'moveBackward' as const, label: 'Back Out', strength: 54, duration: 0.75, delayAfter: 0.35 },
+        { ...project.routeVersions[0].instructions[1], kind: 'moveForward' as const, label: 'Hit Again', strength: 55, duration: 0.75, delayAfter: 0 },
+      ],
+    }
+    const profile = { ...project.behaviorProfiles[1], randomizeConditions: false }
+    const run = simulateRoute(compileInstructionSequence(route, layout.spawn), profile, layout, 52)
+    const wallEvents = run.collisionEvents.filter((event) => event.objectId === 'repeat-wall')
+
+    expect(wallEvents.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('classifies a stronger impact as more severe than a soft brush', () => {
+    const project = createStarterProject()
+    const baseLayout = structuredClone(project.fieldLayouts[0])
+    baseLayout.objects = [
+      {
+        id: 'severity-wall',
+        type: 'wall',
+        name: 'Severity Wall',
+        position: { x: -198, y: 55, z: -120 },
+        rotation: { x: 0, y: 0, z: 0 },
+        size: { x: 10, y: 110, z: 120 },
+        color: '#ff6b6b',
+        isSolid: true,
+        windResponsive: false,
+        note: '',
+      },
+    ]
+    baseLayout.missionCheckpoints = []
+    const profile = { ...project.behaviorProfiles[1], randomizeConditions: false }
+
+    const softRoute = {
+      ...project.routeVersions[0],
+      instructions: [
+        { ...project.routeVersions[0].instructions[0], kind: 'takeoff' as const, delayAfter: 0.1 },
+        { ...project.routeVersions[0].instructions[1], kind: 'moveForward' as const, strength: 20, duration: 0.35, delayAfter: 0 },
+      ],
+    }
+    const hardRoute = {
+      ...project.routeVersions[0],
+      instructions: [
+        { ...project.routeVersions[0].instructions[0], kind: 'takeoff' as const, delayAfter: 0.1 },
+        { ...project.routeVersions[0].instructions[1], kind: 'moveForward' as const, strength: 68, duration: 0.85, delayAfter: 0 },
+      ],
+    }
+
+    const softRun = simulateRoute(compileInstructionSequence(softRoute, baseLayout.spawn), profile, baseLayout, 53)
+    const hardRun = simulateRoute(compileInstructionSequence(hardRoute, baseLayout.spawn), profile, baseLayout, 54)
+    const softSeverity = softRun.collisionEvents[0]?.severity
+    const hardSeverity = hardRun.collisionEvents[0]?.severity
+
+    expect(softSeverity).toBeDefined()
+    expect(hardSeverity).toBeDefined()
+    expect(collisionSeverityRank(hardSeverity!)).toBeGreaterThanOrEqual(collisionSeverityRank(softSeverity!))
+  })
+
+  it('keeps the scoring proxy within the real drone envelope tolerance', () => {
+    const bounds = computeDroneProxyBounds(DRONE_SCORING_PROXY_COMPONENTS)
+
+    expect(Math.abs(bounds.size.x - DRONE_DIMENSIONS_WORLD.width)).toBeLessThan(0.03)
+    expect(Math.abs(bounds.size.y - DRONE_DIMENSIONS_WORLD.height)).toBeLessThan(0.03)
+    expect(Math.abs(bounds.size.z - DRONE_DIMENSIONS_WORLD.length)).toBeLessThan(0.03)
+  })
+
+  it('stores a representative world-space contact point instead of only the drone center', () => {
+    const project = createStarterProject()
+    const layout = structuredClone(project.fieldLayouts[0])
+    layout.objects = [
+      {
+        id: 'contact-wall',
+        type: 'wall',
+        name: 'Contact Wall',
+        position: { x: -188, y: 55, z: -120 },
+        rotation: { x: 0, y: 0, z: 0 },
+        size: { x: 18, y: 110, z: 120 },
+        color: '#ff6b6b',
+        isSolid: true,
+        windResponsive: false,
+        note: '',
+      },
+    ]
+    layout.missionCheckpoints = []
+    const route = {
+      ...project.routeVersions[0],
+      instructions: [
+        { ...project.routeVersions[0].instructions[0], kind: 'takeoff' as const, delayAfter: 0.1 },
+        { ...project.routeVersions[0].instructions[1], kind: 'moveForward' as const, strength: 42, duration: 0.55, delayAfter: 0 },
+      ],
+    }
+    const profile = { ...project.behaviorProfiles[1], randomizeConditions: false }
+    const run = simulateRoute(compileInstructionSequence(route, layout.spawn), profile, layout, 61)
+    const collision = run.collisionEvents[0]
+
+    expect(collision).toBeDefined()
+    expect(Math.hypot(
+      collision!.representativeNormal.x,
+      collision!.representativeNormal.y,
+      collision!.representativeNormal.z,
+    )).toBeGreaterThan(0.5)
+
+    const contactTracePoint =
+      run.trace.find((point) => point.time >= collision!.firstContactTime) ?? run.trace.at(-1)!
+    const centerDelta = Math.hypot(
+      collision!.representativeContactPoint.x - contactTracePoint.actualPosition.x,
+      collision!.representativeContactPoint.y - contactTracePoint.actualPosition.y,
+      collision!.representativeContactPoint.z - contactTracePoint.actualPosition.z,
+    )
+    expect(centerDelta).toBeGreaterThan(1)
+  })
+
+  it('does not inject unrealistic upward velocity on a horizontal wall impact', () => {
+    const project = createStarterProject()
+    const layout = structuredClone(project.fieldLayouts[0])
+    layout.spawn.position.y = 60
+    layout.objects = [
+      {
+        id: 'flat-wall',
+        type: 'wall',
+        name: 'Flat Wall',
+        position: { x: -170, y: 60, z: -120 },
+        rotation: { x: 0, y: 0, z: 0 },
+        size: { x: 12, y: 110, z: 120 },
+        color: '#ff6b6b',
+        isSolid: true,
+        windResponsive: false,
+        note: '',
+      },
+    ]
+    layout.missionCheckpoints = []
+    const route = {
+      ...project.routeVersions[0],
+      instructions: [
+        { ...project.routeVersions[0].instructions[1], kind: 'moveForward' as const, strength: 60, duration: 0.72, delayAfter: 0 },
+      ],
+    }
+    const profile = { ...project.behaviorProfiles[1], randomizeConditions: false }
+    const run = simulateRoute(compileInstructionSequence(route, layout.spawn), profile, layout, 62)
+    const cleanRun = simulateRoute(compileInstructionSequence(route, layout.spawn), profile, { ...layout, objects: [], missionCheckpoints: [] }, 62)
+    const collision = run.collisionEvents[0]
+    const afterImpact =
+      run.trace.find((point) => point.time > (collision?.lastContactTime ?? 0) + 0.08) ?? run.trace.at(-1)!
+    const cleanAfterImpact =
+      cleanRun.trace.find((point) => point.time >= afterImpact.time) ?? cleanRun.trace.at(-1)!
+
+    expect(collision).toBeDefined()
+    expect(Math.abs(afterImpact.actualPosition.y - cleanAfterImpact.actualPosition.y)).toBeLessThanOrEqual(12)
+  })
+
+  it('produces meaningful contact-side data against a rotated obstacle', () => {
+    const project = createStarterProject()
+    const layout = structuredClone(project.fieldLayouts[0])
+    layout.objects = [
+      {
+        id: 'rotated-wall',
+        type: 'wall',
+        name: 'Rotated Wall',
+        position: { x: -185, y: 55, z: -104 },
+        rotation: { x: 0, y: 35, z: 0 },
+        size: { x: 14, y: 110, z: 110 },
+        color: '#ff6b6b',
+        isSolid: true,
+        windResponsive: false,
+        note: '',
+      },
+    ]
+    layout.missionCheckpoints = []
+    const route = {
+      ...project.routeVersions[0],
+      instructions: [
+        { ...project.routeVersions[0].instructions[0], kind: 'takeoff' as const, delayAfter: 0.12 },
+        { ...project.routeVersions[0].instructions[1], kind: 'moveForward' as const, strength: 48, duration: 0.66, delayAfter: 0 },
+      ],
+    }
+    const profile = { ...project.behaviorProfiles[1], randomizeConditions: false }
+    const run = simulateRoute(compileInstructionSequence(route, layout.spawn), profile, layout, 63)
+    const collision = run.collisionEvents[0]
+
+    expect(collision).toBeDefined()
+    expect(Math.hypot(
+      collision!.representativeNormal.x,
+      collision!.representativeNormal.y,
+      collision!.representativeNormal.z,
+    )).toBeGreaterThan(0.5)
+    expect(collision!.representativeContactPoint).not.toEqual(run.trace[0]?.actualPosition)
   })
 })
