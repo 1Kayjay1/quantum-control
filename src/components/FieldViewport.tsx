@@ -1155,6 +1155,7 @@ export function FieldViewport() {
     workspaceMode,
     physicsDebugEnabled,
     activeBehaviorProfileId,
+    setWorkspaceMode,
   } = useProjectStore(
     useShallow((state) => ({
       project: state.project,
@@ -1172,6 +1173,7 @@ export function FieldViewport() {
       workspaceMode: state.workspaceMode,
       physicsDebugEnabled: state.physicsDebugEnabled,
       activeBehaviorProfileId: state.activeBehaviorProfileId,
+      setWorkspaceMode: state.setWorkspaceMode,
     })),
   )
   const [dragState, setDragState] = useState<DragState | null>(null)
@@ -1248,7 +1250,7 @@ export function FieldViewport() {
   const currentFrame = Math.round(playbackTime / (1 / 60))
   const totalFrames = Math.round((run?.metrics.totalTime ?? 0) / (1 / 60))
   const toolbarButtonClass =
-    'inline-flex items-center justify-center rounded-xl border border-white/8 bg-white/[0.04] px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] hover:text-white'
+    'inline-flex h-10 items-center justify-center rounded-2xl border border-white/8 bg-white/[0.04] px-3.5 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] hover:text-white'
   const handleStartDrag = (objectId: string) => {
     const object = layout.objects.find((candidate) => candidate.id === objectId)
     if (!object) {
@@ -1341,29 +1343,84 @@ export function FieldViewport() {
 
   return (
     <section className={`relative min-h-0 w-full overflow-hidden ${workspaceMode === 'scene' ? 'h-full rounded-none' : 'h-[clamp(560px,66vh,740px)] rounded-[22px] max-[900px]:h-[clamp(440px,56vh,540px)]'} bg-[radial-gradient(circle_at_22%_10%,rgba(116,182,255,0.12),transparent_22%),linear-gradient(180deg,rgba(32,67,126,0.96)_0%,rgba(14,31,70,0.98)_42%,rgba(20,44,25,0.98)_42.5%,rgba(10,19,15,1)_100%)]`}>
-      <div className="pointer-events-none absolute left-5 top-5 z-20 flex flex-wrap gap-3 rounded-2xl bg-[#04101bcc]/80 px-4 py-3 text-xs text-slate-200 backdrop-blur-md">
-        <span>T {playbackTime.toFixed(2)}s</span>
-        <span>SPD {activeTrace?.actualSpeed.toFixed(1) ?? '0.0'} cm/s</span>
-        <span>HDG {activeTrace?.actualHeading.toFixed(0) ?? layout.spawn.heading} deg</span>
-        <span>ALT {activeTrace?.actualPosition.y.toFixed(1) ?? layout.spawn.position.y.toFixed(1)} cm</span>
-        <span>DRIFT {drift.toFixed(1)} cm</span>
-        <span>CP {checkpointHits}/{checkpointCount}</span>
+      <div className="pointer-events-none absolute left-5 top-5 z-20 grid gap-3 rounded-[22px] border border-white/8 bg-[#04101bcc]/78 px-4 py-3 backdrop-blur-md">
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+            {workspaceMode === 'scene' ? 'Scene Telemetry' : 'Viewport Telemetry'}
+          </span>
+          <span className="rounded-full bg-amber-300/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-200">
+            {currentInstruction}
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-2 max-[900px]:grid-cols-2">
+          <div className="rounded-2xl border border-white/7 bg-white/[0.03] px-3 py-2">
+            <span className="block text-[10px] uppercase tracking-[0.2em] text-slate-500">Time</span>
+            <strong className="text-sm text-stone-100">{playbackTime.toFixed(2)} s</strong>
+          </div>
+          <div className="rounded-2xl border border-white/7 bg-white/[0.03] px-3 py-2">
+            <span className="block text-[10px] uppercase tracking-[0.2em] text-slate-500">Speed</span>
+            <strong className="text-sm text-stone-100">{activeTrace?.actualSpeed.toFixed(1) ?? '0.0'} cm/s</strong>
+          </div>
+          <div className="rounded-2xl border border-white/7 bg-white/[0.03] px-3 py-2">
+            <span className="block text-[10px] uppercase tracking-[0.2em] text-slate-500">Heading</span>
+            <strong className="text-sm text-stone-100">{activeTrace?.actualHeading.toFixed(0) ?? layout.spawn.heading} deg</strong>
+          </div>
+          <div className="rounded-2xl border border-white/7 bg-white/[0.03] px-3 py-2">
+            <span className="block text-[10px] uppercase tracking-[0.2em] text-slate-500">Altitude</span>
+            <strong className="text-sm text-stone-100">{activeTrace?.actualPosition.y.toFixed(1) ?? layout.spawn.position.y.toFixed(1)} cm</strong>
+          </div>
+          <div className="rounded-2xl border border-white/7 bg-white/[0.03] px-3 py-2">
+            <span className="block text-[10px] uppercase tracking-[0.2em] text-slate-500">Drift</span>
+            <strong className="text-sm text-stone-100">{drift.toFixed(1)} cm</strong>
+          </div>
+          <div className="rounded-2xl border border-white/7 bg-white/[0.03] px-3 py-2">
+            <span className="block text-[10px] uppercase tracking-[0.2em] text-slate-500">Checkpoints</span>
+            <strong className="text-sm text-stone-100">{checkpointHits}/{checkpointCount}</strong>
+          </div>
+        </div>
       </div>
       {workspaceMode === 'scene' ? (
-        <div className="pointer-events-none absolute right-5 top-5 z-20 grid gap-2 rounded-2xl bg-[#04101bcc]/80 px-4 py-3 text-xs text-slate-200 backdrop-blur-md">
-          <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Telemetry</span>
-          <span>Instruction: {currentInstruction}</span>
-          <span>Active Segments: {activeSegmentLabels || 'None'}</span>
-          <span>Collisions: {run?.metrics.collisionCount ?? 0}</span>
-          <span>Checkpoint: {checkpointHits}/{checkpointCount}</span>
+        <div className="absolute right-5 top-5 z-20 grid min-w-[280px] gap-3 rounded-[22px] border border-white/8 bg-[#04101bcc]/80 px-4 py-3 text-xs text-slate-200 backdrop-blur-md">
+          <div className="flex items-center justify-between gap-3">
+            <div className="grid gap-0.5">
+              <span className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Scene Review</span>
+              <strong className="text-sm font-semibold text-stone-100">Immersive replay</strong>
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-2xl border border-white/8 bg-white/[0.04] px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-200 transition hover:bg-white/[0.08] hover:text-white"
+              onClick={() => setWorkspaceMode('editor')}
+            >
+              Exit Scene
+            </button>
+          </div>
+          <div className="grid gap-2 rounded-2xl border border-white/7 bg-white/[0.03] px-3.5 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Instruction</span>
+              <span className="text-sm font-semibold text-stone-100">{currentInstruction}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Active Segments</span>
+              <span className="max-w-[150px] truncate text-sm text-slate-300">{activeSegmentLabels || 'None'}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Collisions</span>
+              <span className="text-sm text-slate-300">{run?.metrics.collisionCount ?? 0}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Scene Controls</span>
+              <span className="text-sm text-slate-300">WASD, drag, F, Tab</span>
+            </div>
+          </div>
           {physicsDebugEnabled ? (
-            <>
+            <div className="grid gap-2 rounded-2xl border border-amber-400/15 bg-amber-400/6 px-3.5 py-3">
+              <span className="text-[10px] uppercase tracking-[0.22em] text-amber-200/80">Physics Debug</span>
               <span>Vel Vec: {velocityVector.x.toFixed(1)} / {velocityVector.z.toFixed(1)}</span>
-              <span>Pitch/Roll: {activeTrace?.actualPitch.toFixed(2) ?? '0.00'} / {activeTrace?.actualRoll.toFixed(2) ?? '0.00'}</span>
+              <span>Pitch / Roll: {activeTrace?.actualPitch.toFixed(2) ?? '0.00'} / {activeTrace?.actualRoll.toFixed(2) ?? '0.00'}</span>
               <span>Ground Effect: {actualDrone.y < 25 ? 'Elevated' : 'Normal'}</span>
-              <span>Proxy W/L/H: {(dronePhysicsProxyBounds.size.x * 100).toFixed(1)} / {(dronePhysicsProxyBounds.size.z * 100).toFixed(1)} / {(dronePhysicsProxyBounds.size.y * 100).toFixed(1)} cm</span>
-              <span>Score W/L/H: {(droneScoringProxyBounds.size.x * 100).toFixed(1)} / {(droneScoringProxyBounds.size.z * 100).toFixed(1)} / {(droneScoringProxyBounds.size.y * 100).toFixed(1)} cm</span>
-            </>
+              <span>Physics Proxy: {(dronePhysicsProxyBounds.size.x * 100).toFixed(1)} / {(dronePhysicsProxyBounds.size.z * 100).toFixed(1)} / {(dronePhysicsProxyBounds.size.y * 100).toFixed(1)} cm</span>
+              <span>Scoring Proxy: {(droneScoringProxyBounds.size.x * 100).toFixed(1)} / {(droneScoringProxyBounds.size.z * 100).toFixed(1)} / {(droneScoringProxyBounds.size.y * 100).toFixed(1)} cm</span>
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -1406,9 +1463,9 @@ export function FieldViewport() {
         />
       </Canvas>
 
-      <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-center justify-between gap-4 border-t border-white/8 bg-gradient-to-t from-[#07101b] via-[#07101be8] to-transparent px-5 py-4 backdrop-blur-sm max-[900px]:justify-start">
+      <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-center justify-between gap-4 border-t border-white/8 bg-gradient-to-t from-[#07101b] via-[#07101be8] to-transparent px-5 py-4 backdrop-blur-sm max-[1100px]:justify-start">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">Replay</span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Replay</span>
           <button
             type="button"
             className={toolbarButtonClass}
@@ -1431,42 +1488,47 @@ export function FieldViewport() {
             className={toolbarButtonClass}
             onClick={() => {
               setPlaybackState('paused')
-              setPlaybackTime(Math.max(0, playbackTime - 1 / 60))
-            }}
-          >
-            Prev Frame
-          </button>
-          <button
-            type="button"
-            className={toolbarButtonClass}
-            onClick={() => {
-              setPlaybackState('paused')
-              setPlaybackTime(playbackTime + 1 / 60)
-            }}
-          >
-            Next Frame
-          </button>
-          <button
-            type="button"
-            className={toolbarButtonClass}
-            onClick={() => {
-              setPlaybackState('paused')
               setPlaybackTime(playbackTime + 5)
             }}
           >
             Forward 5s
           </button>
-          <span className="text-sm text-slate-400">
+          <span className="rounded-full border border-white/8 bg-white/[0.03] px-3 py-2 text-sm text-slate-300">
             Frame {run ? `${currentFrame}/${totalFrames}` : '0/0'}
           </span>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">Object Edit</span>
-          <span className="text-sm text-slate-400">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Object Edit</span>
+          <span className="hidden rounded-full border border-white/8 bg-white/[0.03] px-3 py-2 text-sm text-slate-300">
             {selectedObject
               ? `${selectedObject.name} selected · drag to move · Shift = X only · Ctrl = Z only · ↑↓ height`
-              : 'No object selected'}
+              : 'Double-click any object to move it'}
+          </span>
+          <span className="hidden rounded-full border border-white/8 bg-white/[0.03] px-3 py-2 text-sm text-slate-300">
+            {selectedObject
+              ? `${selectedObject.name} selected · drag to move · Shift = X · Ctrl = Z · arrows = nudge / height`
+              : 'Double-click any object to move it'}
+          </span>
+          <span className="rounded-full border border-white/8 bg-white/[0.03] px-3 py-2 text-sm text-slate-300">
+            {selectedObject
+              ? `${selectedObject.name} selected | drag to move | Shift = X axis | Ctrl = Z axis | arrows = nudge / height`
+              : 'Double-click any object to move it'}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Legend</span>
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/8 bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-300" />
+            Checkpoint
+          </span>
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/8 bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
+            <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
+            Warning
+          </span>
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/8 bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
+            <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
+            Collision
           </span>
         </div>
       </div>

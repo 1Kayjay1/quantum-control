@@ -232,7 +232,11 @@ function renderInstructionFields(
   )
 }
 
-export function RightPanel() {
+export function RightPanel({
+  flat = false,
+}: {
+  flat?: boolean
+}) {
   const { project, activeRouteId, selectedInstructionId, updateInstruction } = useProjectStore(
     useShallow((state) => ({
       project: state.project,
@@ -247,72 +251,105 @@ export function RightPanel() {
   const selectedInstructionIndex = selectedInstruction
     ? activeRoute.instructions.findIndex((instruction) => instruction.id === selectedInstruction.id) + 1
     : null
+  const groupClass = flat
+    ? 'grid gap-4 border-t border-white/8 pt-4'
+    : 'grid gap-4 rounded-[22px] border border-white/8 bg-white/[0.02] p-4'
+  const sectionClass = flat
+    ? 'grid gap-5 border-t border-white/8 pt-4'
+    : 'grid gap-5 rounded-[22px] border border-white/8 bg-white/[0.02] p-4'
+  const emptyClass = flat
+    ? 'border-t border-dashed border-white/10 px-0 py-5 text-sm leading-6 text-slate-500'
+    : 'rounded-[22px] border border-dashed border-white/10 bg-white/[0.015] px-4 py-5 text-sm leading-6 text-slate-500'
 
   return (
     <section className="grid gap-6">
       <PanelSection
-        title="Step Settings"
-        subtitle="Tune the selected route event. Strength, timing, notes, and overlap live here."
+        title="Event Settings"
+        subtitle="Tune the selected route event. Primary control values live first; note, tags, and enable state stay lower."
       >
         {selectedInstruction ? (
           <>
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="rounded-full bg-amber-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300">
-                Step {String(selectedInstructionIndex).padStart(2, '0')}
-              </span>
-              <span className="rounded-full bg-blue-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-200">
-                {getInstructionFamily(selectedInstruction.kind)}
-              </span>
-            </div>
-
-            <TextField
-              label="Action label"
-              value={selectedInstruction.label}
-              onChange={(value) => updateInstruction(selectedInstruction.id, { label: value })}
-            />
-
-            {renderInstructionFields(selectedInstruction, activeRoute.timingResolution, updateInstruction)}
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <TextField
-                label="Version tag"
-                value={selectedInstruction.versionTag}
-                onChange={(value) => updateInstruction(selectedInstruction.id, { versionTag: value })}
-              />
-              <label className="grid gap-2">
-                <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">
-                  Enabled
+            <div className={groupClass}>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="rounded-full bg-amber-300/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-300">
+                  Step {String(selectedInstructionIndex).padStart(2, '0')}
                 </span>
-                <div className="flex h-[42px] items-center justify-between rounded-xl border border-white/8 bg-white/[0.03] px-3.5">
-                  <span className="text-sm text-slate-300">Use in route</span>
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 accent-amber-400"
-                    checked={selectedInstruction.enabled}
-                    onChange={(event) =>
-                      updateInstruction(selectedInstruction.id, {
-                        enabled: event.target.checked,
-                      })
-                    }
-                  />
-                </div>
-              </label>
+                <span className="rounded-full bg-blue-400/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-blue-200">
+                  {getInstructionFamily(selectedInstruction.kind)}
+                </span>
+                <span className="rounded-full bg-white/[0.04] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                  {selectedInstruction.enabled ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+              <TextField
+                label="Action label"
+                value={selectedInstruction.label}
+                onChange={(value) => updateInstruction(selectedInstruction.id, { label: value })}
+              />
             </div>
 
-            <TextAreaField
-              label="Step note"
-              value={selectedInstruction.note}
-              onChange={(value) => updateInstruction(selectedInstruction.id, { note: value })}
-            />
+            <div className={sectionClass}>
+              <div className="grid gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                  Control Values
+                </span>
+                <p className="text-sm leading-6 text-slate-500">
+                  Direction, strength, and scheduling values for the selected event.
+                </p>
+              </div>
+              {renderInstructionFields(selectedInstruction, activeRoute.timingResolution, updateInstruction)}
+            </div>
 
-            <p className="text-sm leading-6 text-slate-500">
-              Route events represent held control inputs. `Stack next by` starts the following input early.
-            </p>
+            <div className={sectionClass}>
+              <div className="grid gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                  Metadata
+                </span>
+                <p className="text-sm leading-6 text-slate-500">
+                  Use notes and tags to explain why the event exists or how it should be tuned later.
+                </p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <TextField
+                  label="Version tag"
+                  value={selectedInstruction.versionTag}
+                  onChange={(value) => updateInstruction(selectedInstruction.id, { versionTag: value })}
+                />
+                <label className="grid gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                    Enabled
+                  </span>
+                  <div className="flex h-[48px] items-center justify-between rounded-2xl border border-white/8 bg-[#0b1321]/78 px-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                    <span className="text-sm text-slate-300">Use in route</span>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-amber-400"
+                      checked={selectedInstruction.enabled}
+                      onChange={(event) =>
+                        updateInstruction(selectedInstruction.id, {
+                          enabled: event.target.checked,
+                        })
+                      }
+                    />
+                  </div>
+                </label>
+              </div>
+
+              <TextAreaField
+                label="Step note"
+                value={selectedInstruction.note}
+                onChange={(value) => updateInstruction(selectedInstruction.id, { note: value })}
+              />
+
+              <p className="text-sm leading-6 text-slate-500">
+                `Stack next by` starts the following input early. Use the timeline for timing, then verify the result in replay.
+              </p>
+            </div>
           </>
         ) : (
-          <p className="text-sm leading-6 text-slate-500">
+          <div className={emptyClass}>
             Select an event on the timeline to edit its direction, strength, hold time, and note.
-          </p>
+          </div>
         )}
       </PanelSection>
     </section>

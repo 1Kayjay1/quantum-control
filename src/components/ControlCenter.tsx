@@ -401,7 +401,7 @@ export function ControlCenter() {
             <div className="grid gap-1">
               <strong className="text-sm font-semibold text-stone-100">Field Builder</strong>
               <span className="text-sm leading-6 text-slate-500">
-                Double-click an object in the viewport, then drag on the grid or use the transform gizmo.
+                Double-click an object in the viewport, then drag it directly or use the keyboard nudges.
               </span>
             </div>
 

@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quantum Control | Autonomous Flight Systems</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- GSAP for Scroll Animations -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+    
+    <!-- Three.js Import Map -->
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+      }
+    </script>
+
+    <style>
+        :root {
+            --bg-dark: #050505;
+            --accent: #f59e0b; /* Amber/Gold */
+            --accent-glow: rgba(245, 158, 11, 0.4);
+            --text-main: #ffffff;
+            --text-muted: #94a3b8;
+            --glass: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* --- 3D Canvas --- */
+        #canvas-container {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100vh;
+            z-index: -1;
+            /* Gradient overlay to make text readable */
+            background: radial-gradient(circle at 50% 50%, rgba(5,5,5,0) 0%, rgba(5,5,5,0.8) 80%, var(--bg-dark) 100%);
+        }
+
+        /* --- Navigation --- */
+        nav {
+            position: fixed;
+            top: 0; left: 0; width: 100%;
+            padding: 24px 48px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+            background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent);
+        }
+
+        .logo {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+            font-size: 1.2rem;
+            letter-spacing: -0.02em;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+        }
+        .logo span { color: var(--accent); }
+
+        .nav-links {
+            display: flex;
+            gap: 40px;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.3s;
+            position: relative;
+        }
+
+        .nav-links a:hover { color: var(--text-main); }
+        
+        .nav-links a::after {
+            content: ''; position: absolute; bottom: -5px; left: 0; width: 0%; height: 1px;
+            background: var(--accent); transition: width 0.3s;
+        }
+        .nav-links a:hover::after { width: 100%; }
+
+        .btn-login {
+            padding: 10px 24px;
+            border: 1px solid var(--border);
+            border-radius: 100px;
+            color: var(--text-main);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+            background: var(--glass);
+        }
+        .btn-login:hover {
+            background: var(--text-main);
+            color: var(--bg-dark);
+            border-color: var(--text-main);
+        }
+
+        /* --- Sections --- */
+        section {
+            padding: 0 10%;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            position: relative;
+        }
+
+        /* Hero */
+        .hero {
+            align-items: flex-start;
+            padding-top: 20vh;
+        }
+
+        .hero h1 {
+            font-size: clamp(3rem, 8vw, 6rem);
+            line-height: 1.1;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            margin-bottom: 24px;
+            background: linear-gradient(to right, #fff 20%, #94a3b8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero p {
+            font-size: 1.2rem;
+            color: var(--text-muted);
+            max-width: 600px;
+            margin-bottom: 40px;
+            line-height: 1.6;
+        }
+
+        .cta-group {
+            display: flex;
+            gap: 20px;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #000;
+            padding: 16px 32px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 30px var(--accent-glow);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-main);
+            padding: 16px 32px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        .btn-secondary:hover { background: rgba(255,255,255,0.05); }
+
+        /* Features */
+        .features {
+            align-items: center;
+            text-align: center;
+        }
+        
+        .features h2 {
+            font-size: 2.5rem;
+            margin-bottom: 60px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            width: 100%;
+        }
+
+        .card {
+            background: var(--glass);
+            border: 1px solid var(--border);
+            padding: 40px;
+            border-radius: 12px;
+            text-align: left;
+            transition: transform 0.3s;
+            backdrop-filter: blur(5px);
+        }
+        .card:hover { transform: translateY(-5px); border-color: var(--accent); }
+
+        .card-icon {
+            font-size: 2rem;
+            margin-bottom: 20px;
+            color: var(--accent);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .card h3 { margin-bottom: 10px; font-size: 1.25rem; }
+        .card p { color: var(--text-muted); line-height: 1.5; }
+
+        /* Team Section */
+        .team {
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .team-text { max-width: 500px; }
+        .team-text h2 { font-size: 3rem; margin-bottom: 20px; }
+        .team-text p { color: var(--text-muted); margin-bottom: 30px; font-size: 1.1rem; }
+
+        /* Footer */
+        footer {
+            padding: 40px 10%;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            background: #020202;
+        }
+
+        /* Mobile Adjustments */
+        @media (max-width: 768px) {
+            nav { padding: 20px; }
+            .nav-links { display: none; } /* Simplified for demo */
+            .hero h1 { font-size: 3rem; }
+            .team { flex-direction: column; text-align: center; gap: 40px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 3D Background -->
+    <div id="canvas-container"></div>
+
+    <!-- Navigation -->
+    <nav>
+        <a href="#" class="logo">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 12h3v8h6v-6h2v6h6v-8h3L12 2z"/>
+            </svg>
+            QUANTUM <span>CONTROL</span>
+        </a>
+        <ul class="nav-links">
+            <li><a href="#workspace">Workspace</a></li>
+            <li><a href="#team">Team</a></li>
+            <li><a href="#login">Log In</a></li>
+        </ul>
+        <a href="#workspace" class="btn-login">Sign In</a>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <h1 class="animate-title">The Future of<br>Autonomous Flight.</h1>
+        <p class="animate-subtitle">Design, simulate, and deploy drone missions with physics-grade precision. The ultimate professional ground control station.</p>
+        <div class="cta-group animate-btns">
+            <a href="#workspace" class="btn-primary">Launch Workspace</a>
+            <a href="#" class="btn-secondary">View Documentation</a>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features">
+        <h2>Engineered for Precision</h2>
+        <div class="grid">
+            <div class="card">
+                <div class="card-icon">PHYSICS</div>
+                <h3>Real-time Dynamics</h3>
+                <p>Built on a custom physics engine. Simulate wind, drag, inertia, and payload variations accurately.</p>
+            </div>
+            <div class="card">
+                <div class="card-icon">SWARM</div>
+                <h3>Fleet Management</h3>
+                <p>Control single units or coordinate swarms of hundreds of drones with our intuitive timeline sequencer.</p>
+            </div>
+            <div class="card">
+                <div class="card-icon">CODE</div>
+                <h3>Developer First</h3>
+                <p>Full API access. Script complex behaviors in Python or JavaScript directly in the browser.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Team/About Section -->
+    <section class="team">
+        <div class="team-text">
+            <h2>Built by Engineers,<br>for Engineers.</h2>
+            <p>We are a distributed team of aerospace and software veterans dedicated to democratizing autonomous flight technology.</p>
+            <a href="#team" class="btn-secondary">Meet the Team</a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div>&copy; 2023 Quantum Control Systems.</div>
+        <div style="display:flex; gap:20px;">
+            <a href="#" style="color:inherit; text-decoration:none;">Privacy</a>
+            <a href="#" style="color:inherit; text-decoration:none;">Terms</a>
+            <a href="#" style="color:inherit; text-decoration:none;">Contact</a>
+        </div>
+    </footer>
+
+    <!-- Application Logic -->
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- Configuration ---
+        const DRONE_COUNT = 40;
+        const COLORS = [0xf59e0b, 0x3b82f6, 0x10b981, 0xffffff]; // Gold, Blue, Emerald, White
+
+        // --- Scene Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        // Fog for depth
+        scene.fog = new THREE.FogExp2(0x050505, 0.035);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.z = 5;
+
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Performance opt
+        container.appendChild(renderer.domElement);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0x404040, 2);
+        scene.add(ambientLight);
+
+        const pointLight = new THREE.PointLight(0xffffff, 2, 50);
+        pointLight.position.set(0, 0, 5);
+        scene.add(pointLight);
+
+        // --- Procedural Drone Model ---
+        // Instead of loading a heavy model, we build a cool geometric one
+        function createDroneMesh() {
+            const group = new THREE.Group();
+
+            // Core
+            const coreGeo = new THREE.OctahedronGeometry(0.1, 0);
+            const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true });
+            const core = new THREE.Mesh(coreGeo, coreMat);
+            group.add(core);
+
+            // Rotating Rings
+            const ringGeo = new THREE.TorusGeometry(0.2, 0.01, 8, 32);
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.6 });
+            
+            const ring1 = new THREE.Mesh(ringGeo, ringMat);
+            const ring2 = new THREE.Mesh(ringGeo, ringMat);
+            ring2.rotation.x = Math.PI / 2;
+            
+            group.add(ring1);
+            group.add(ring2);
+
+            // Engine glow
+            const glowGeo = new THREE.SphereGeometry(0.05, 8, 8);
+            const glowMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+            const glow = new THREE.Mesh(glowGeo, glowMat);
+            glow.position.z = 0.1;
+            group.add(glow);
+
+            // Store rings for animation
+            group.userData = { ring1, ring2, speed: Math.random() * 0.05 + 0.02 };
+            
+            return group;
+        }
+
+        // --- Create Swarm ---
+        const drones = [];
+        const droneGroup = new THREE.Group();
+
+        for (let i = 0; i < DRONE_COUNT; i++) {
+            const drone = createDroneMesh();
+            
+            // Random positioning spread out
+            drone.position.set(
+                (Math.random() - 0.5) * 15,
+                (Math.random() - 0.5) * 15,
+                (Math.random() - 0.5) * 10
+            );
+
+            // Random rotation
+            drone.rotation.set(
+                Math.random() * Math.PI,
+                Math.random() * Math.PI,
+                0
+            );
+
+            // Store initial pos for animation
+            drone.userData.initialPos = drone.position.clone();
+            drone.userData.randomOffset = Math.random() * 100;
+
+            droneGroup.add(drone);
+            drones.push(drone);
+        }
+        scene.add(droneGroup);
+
+        // --- Interaction State ---
+        let mouseX = 0;
+        let mouseY = 0;
+        let targetX = 0;
+        let targetY = 0;
+
+        document.addEventListener('mousemove', (event) => {
+            mouseX = (event.clientX - window.innerWidth / 2) * 0.001;
+            mouseY = (event.clientY - window.innerHeight / 2) * 0.001;
+        });
+
+        // --- Animation Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = clock.getElapsedTime();
+
+            // Smooth mouse follow
+            targetX = mouseX * 0.5;
+            targetY = mouseY * 0.5;
+
+            // Rotate entire swarm gently based on mouse
+            droneGroup.rotation.y += 0.05 * (targetX - droneGroup.rotation.y);
+            droneGroup.rotation.x += 0.05 * (targetY - droneGroup.rotation.x);
+
+            // Animate individual drones
+            drones.forEach((drone) => {
+                // Bobbing motion
+                const yOffset = Math.sin(time + drone.userData.randomOffset) * 0.2;
+                drone.position.y = drone.userData.initialPos.y + yOffset;
+
+                // Spin rings
+                drone.userData.ring1.rotation.z += drone.userData.speed;
+                drone.userData.ring2.rotation.x += drone.userData.speed;
+
+                // Subtle "breathing" scale
+                const scale = 1 + Math.sin(time * 2 + drone.userData.randomOffset) * 0.1;
+                drone.scale.setScalar(scale);
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // --- GSAP Scroll Animations ---
+        gsap.registerPlugin(ScrollTrigger);
+
+        // 1. Parallax Camera Fly-through
+        // Move camera forward (Z) and rotate slightly as user scrolls down
+        gsap.to(camera.position, {
+            z: -2,
+            scrollTrigger: {
+                trigger: "body",
+                start: "top top",
+                end: "bottom bottom",
+                scrub: 1
+            }
+        });
+
+        // Rotate the entire swarm as we scroll to simulate flying past it
+        gsap.to(droneGroup.rotation, {
+            y: Math.PI * 0.5,
+            scrollTrigger: {
+                trigger: "body",
+                start: "top top",
+                end: "bottom bottom",
+                scrub: 1
+            }
+        });
+
+        // 2. Text Reveals
+        gsap.from(".animate-title", {
+            y: 100,
+            opacity: 0,
+            duration: 1,
+            ease: "power3.out"
+        });
+
+        gsap.from(".animate-subtitle", {
+            y: 50,
+            opacity: 0,
+            duration: 1,
+            delay: 0.3,
+            ease: "power3.out"
+        });
+
+        gsap.from(".animate-btns", {
+            y: 50,
+            opacity: 0,
+            duration: 1,
+            delay: 0.6,
+            ease: "power3.out"
+        });
+
+        // 3. Feature Cards Stagger
+        gsap.from(".card", {
+            y: 100,
+            opacity: 0,
+            duration: 0.8,
+            stagger: 0.2,
+            scrollTrigger: {
+                trigger: ".grid",
+                start: "top 80%",
+            }
+        });
+
+        // --- Resize Handler ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+    </script>
+</body>
+</html>

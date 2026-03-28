@@ -1,0 +1,129 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userDocExists() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAuthorized() {
+      return userDocExists() && (
+        (userDoc().data.accountState == 'active' && userDoc().data.status == 'active') ||
+        userDoc().data.authenticated == true
+      );
+    }
+
+    function isAdmin() {
+      return isAuthorized() && userDoc().data.role == 'admin';
+    }
+
+    function isOwner(ownerId) {
+      return isAuthenticated() && request.auth.uid == ownerId;
+    }
+
+    function isMember(members) {
+      return isAuthenticated() && request.auth.uid in members;
+    }
+
+    function isTeamWorkspace(data) {
+      return data.type == 'team';
+    }
+
+    function canReadWorkspace(data) {
+      return isAuthorized() && (
+        isTeamWorkspace(data) ||
+        isOwner(data.ownerId) ||
+        isMember(data.members)
+      );
+    }
+
+    function canCreateMissionInWorkspace(data) {
+      return canReadWorkspace(data);
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+
+      allow read: if userDocExists() &&
+        userDoc().data.role in ['instructor', 'admin'];
+
+      allow create: if isAuthenticated() &&
+        request.auth.uid == userId &&
+        request.resource.data.email == request.auth.token.email;
+
+      allow update: if isAuthenticated() && (
+        (
+          request.auth.uid == userId &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.accountState == resource.data.accountState &&
+          request.resource.data.status == resource.data.status &&
+          request.resource.data.authenticated == resource.data.authenticated
+        ) ||
+        isAdmin()
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    match /workspaces/{workspaceId} {
+      allow read: if canReadWorkspace(resource.data);
+
+      allow create: if isAuthorized() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        request.auth.uid in request.resource.data.members &&
+        request.resource.data.pinnedMissionIds.size() <= 5 &&
+        request.resource.data.type in ['personal', 'team'];
+
+      allow update: if isAuthorized() && (
+        (
+          isOwner(resource.data.ownerId) &&
+          request.resource.data.ownerId == resource.data.ownerId &&
+          request.resource.data.type == resource.data.type &&
+          request.resource.data.pinnedMissionIds.size() <= 5
+        ) ||
+        (
+          canReadWorkspace(resource.data) &&
+          request.resource.data.diff(resource.data).changedKeys().hasOnly(['pinnedMissionIds', 'updatedAt']) &&
+          request.resource.data.pinnedMissionIds.size() <= 5
+        )
+      );
+
+      allow delete: if isAuthorized() && isOwner(resource.data.ownerId);
+    }
+
+    match /missions/{missionId} {
+      allow read: if isAuthorized() &&
+        exists(/databases/$(database)/documents/workspaces/$(resource.data.workspaceId)) &&
+        canReadWorkspace(get(/databases/$(database)/documents/workspaces/$(resource.data.workspaceId)).data);
+
+      allow create: if isAuthorized() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        exists(/databases/$(database)/documents/workspaces/$(request.resource.data.workspaceId)) &&
+        canCreateMissionInWorkspace(get(/databases/$(database)/documents/workspaces/$(request.resource.data.workspaceId)).data);
+
+      allow update: if isAuthorized() &&
+        resource.data.ownerId == request.auth.uid &&
+        request.resource.data.ownerId == resource.data.ownerId &&
+        request.resource.data.createdAt == resource.data.createdAt;
+
+      allow delete: if isAuthorized() &&
+        resource.data.ownerId == request.auth.uid;
+    }
+
+    match /teams/{teamId} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

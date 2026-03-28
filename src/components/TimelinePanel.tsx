@@ -10,20 +10,20 @@ import type { InstructionBlock, PlannedSegment, RouteVersion } from '../core/typ
 import { useProjectStore } from '../store/projectStore'
 
 const BASE_PIXELS_PER_SECOND = 128
-const CLIP_LANE_HEIGHT = 88
-const CLIP_HEIGHT = 62
-const TRACK_PADDING = 18
+const CLIP_LANE_HEIGHT = 82
+const CLIP_HEIGHT = 58
+const TRACK_PADDING = 20
 const EXTRA_TIMELINE_SECONDS = 6
 const MIN_DURATION_SECONDS = 0.1
-const RULER_HEIGHT = 36
-const LANE_LABEL_WIDTH = 104
+const RULER_HEIGHT = 40
+const LANE_LABEL_WIDTH = 118
 const TIMELINE_LANES = [
-  { label: 'Pitch', hint: 'Forward / back' },
-  { label: 'Roll', hint: 'Left / right' },
-  { label: 'Throttle', hint: 'Up / down' },
-  { label: 'Yaw', hint: 'Rotate' },
-  { label: 'Hover', hint: 'Wait / hover' },
-  { label: 'Markers', hint: 'Hits / fail' },
+  { label: 'Pitch', hint: 'Forward / back', accent: 'bg-blue-300' },
+  { label: 'Roll', hint: 'Left / right', accent: 'bg-cyan-300' },
+  { label: 'Throttle', hint: 'Up / down', accent: 'bg-emerald-300' },
+  { label: 'Yaw', hint: 'Rotate', accent: 'bg-amber-300' },
+  { label: 'Hover', hint: 'Wait / hover', accent: 'bg-violet-300' },
+  { label: 'Markers', hint: 'Hits / fail', accent: 'bg-rose-300' },
 ] as const
 
 function getInstructionLane(kind: InstructionBlock['kind']) {
@@ -45,6 +45,32 @@ function getInstructionLane(kind: InstructionBlock['kind']) {
     default:
       return 4
   }
+}
+
+function getInstructionTone(
+  instruction: InstructionBlock,
+  isSelected: boolean,
+  isCurrent: boolean,
+) {
+  const family = getInstructionFamily(instruction.kind)
+  const isRotation = instruction.kind === 'rotateCW' || instruction.kind === 'rotateCCW'
+  const base =
+    family === 'control' && !isRotation
+      ? 'from-blue-400/80 via-blue-500/45 to-slate-950'
+      : isRotation
+        ? 'from-amber-300/80 via-amber-500/40 to-slate-950'
+        : family === 'timed'
+          ? 'from-cyan-300/75 via-cyan-500/38 to-slate-950'
+          : 'from-emerald-300/75 via-violet-500/30 to-slate-950'
+
+  const border = isSelected ? 'border-white/80' : isCurrent ? 'border-amber-300/55' : 'border-white/10'
+  const ring = isSelected
+    ? 'ring-2 ring-white/70 shadow-[0_18px_36px_rgba(0,0,0,0.42)]'
+    : isCurrent
+      ? 'ring-1 ring-amber-300/55 shadow-[0_14px_28px_rgba(0,0,0,0.34)]'
+      : 'shadow-[0_12px_24px_rgba(0,0,0,0.28)]'
+
+  return { base, border, ring }
 }
 
 type DragMode = 'move' | 'resize-start' | 'resize-end'
@@ -344,6 +370,9 @@ export function TimelinePanel() {
       (segment) =>
         playbackTime >= segment.startTime && playbackTime <= segment.endTime + segment.delayAfter,
     ) ?? null
+  const selectedInstruction = selectedInstructionId
+    ? previewRoute.instructions.find((instruction) => instruction.id === selectedInstructionId) ?? null
+    : null
 
   useEffect(() => {
     previewPatchesRef.current = previewPatches
@@ -491,6 +520,12 @@ export function TimelinePanel() {
             <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">Route</span>
             <strong className="text-sm text-stone-100">{activeRoute.name}</strong>
           </div>
+          <div className="grid gap-1">
+            <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">Selection</span>
+            <strong className="max-w-[220px] truncate text-sm text-stone-100">
+              {selectedInstruction ? formatInstructionLabel(selectedInstruction) : 'No event selected'}
+            </strong>
+          </div>
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -518,11 +553,14 @@ export function TimelinePanel() {
             >
               +
             </button>
+            <span className="rounded-full border border-white/8 bg-white/[0.03] px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
+              {Math.round(timelineZoom * 100)}% zoom
+            </span>
           </div>
         </div>
       </div>
 
-      <div className="grid min-w-0 grid-cols-[104px_minmax(0,1fr)] gap-0 max-[900px]:grid-cols-1">
+      <div className="grid min-w-0 grid-cols-[118px_minmax(0,1fr)] gap-0 max-[900px]:grid-cols-1">
         <div className="grid content-start border-r border-white/8 pr-4 max-[900px]:hidden">
           <div
             className="flex items-center text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500"
@@ -536,7 +574,8 @@ export function TimelinePanel() {
               className="flex items-center pr-3 text-right"
               style={{ height: `${CLIP_LANE_HEIGHT}px` }}
             >
-              <div className="w-full">
+              <div className="grid w-full gap-1 rounded-2xl border border-transparent px-3 py-2 transition hover:border-white/8 hover:bg-white/[0.03]">
+                <span className={`h-1.5 w-10 rounded-full ${lane.accent}`} />
                 <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                   {lane.label}
                 </div>
@@ -552,7 +591,7 @@ export function TimelinePanel() {
           <div className="min-w-0 overflow-x-auto overflow-y-hidden scrollbar-thin">
             <div className="min-w-max" style={{ width: `${trackWidth}px` }}>
               <div
-                className="relative border-b border-white/8"
+                className="relative border-b border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0))]"
                 style={{ height: `${RULER_HEIGHT}px` }}
               >
                 {Array.from({ length: rulerTicks }, (_, tickIndex) => {
@@ -626,119 +665,124 @@ export function TimelinePanel() {
                 />
 
                 {displaySegments.map((segment, index) => {
-            const instruction = previewRoute.instructions.find((candidate) => candidate.id === segment.instructionId)
-            if (!instruction) {
-              return null
-            }
+                  const instruction = previewRoute.instructions.find((candidate) => candidate.id === segment.instructionId)
+                  if (!instruction) {
+                    return null
+                  }
 
-            const lane = getInstructionLane(instruction.kind)
-            const isSelected = instruction.id === selectedInstructionId
-            const isCurrent = currentRunSegment?.instructionId === instruction.id
-            const left = TRACK_PADDING + segment.scheduledStart * pixelsPerSecond
-            const top = TRACK_PADDING + lane * CLIP_LANE_HEIGHT + (CLIP_LANE_HEIGHT - CLIP_HEIGHT) * 0.5
-            const width = Math.max(
-              getMinDuration(activeRoute.timingResolution) * pixelsPerSecond,
-              segment.duration * pixelsPerSecond,
-            )
-            const family = getInstructionFamily(instruction.kind)
-            const isRotation = instruction.kind === 'rotateCW' || instruction.kind === 'rotateCCW'
-            const familyClass =
-              family === 'control' && !isRotation
-                ? 'from-blue-400/75 to-blue-900/90'
-                : isRotation
-                  ? 'from-amber-300/80 to-amber-900/95'
-                  : family === 'timed'
-                    ? 'from-cyan-300/70 to-cyan-900/95'
-                    : 'from-emerald-300/70 to-violet-900/95'
+                  const lane = getInstructionLane(instruction.kind)
+                  const isSelected = instruction.id === selectedInstructionId
+                  const isCurrent = currentRunSegment?.instructionId === instruction.id
+                  const left = TRACK_PADDING + segment.scheduledStart * pixelsPerSecond
+                  const top = TRACK_PADDING + lane * CLIP_LANE_HEIGHT + (CLIP_LANE_HEIGHT - CLIP_HEIGHT) * 0.5
+                  const width = Math.max(
+                    getMinDuration(activeRoute.timingResolution) * pixelsPerSecond,
+                    segment.duration * pixelsPerSecond,
+                  )
+                  const { base, border, ring } = getInstructionTone(instruction, isSelected, isCurrent)
+                  const overlapTag = instruction.stackNextBy > 0 ? `${instruction.stackNextBy.toFixed(1)}s overlap` : null
 
-                return (
-                  <article
-                    key={instruction.id}
-                    data-clip-block="true"
-                    className={`absolute grid grid-cols-[10px_minmax(0,1fr)_10px] items-stretch overflow-hidden rounded-xl border bg-gradient-to-br shadow-[0_10px_22px_rgba(0,0,0,0.28)] transition hover:-translate-y-0.5 ${
-                      familyClass
-                    } ${
-                      isSelected ? 'border-white/80 shadow-[0_16px_34px_rgba(0,0,0,0.36)]' : 'border-white/10'
-                    } ${isCurrent ? 'ring-2 ring-amber-300/80 ring-offset-1 ring-offset-transparent' : ''}`}
-                    style={{
-                      left: `${left}px`,
-                      top: `${top}px`,
-                      width: `${width}px`,
-                      height: `${CLIP_HEIGHT}px`,
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="cursor-ew-resize bg-gradient-to-r from-white/35 to-transparent"
-                      aria-label={`Resize start for ${formatInstructionLabel(instruction)}`}
-                      onPointerDown={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        selectInstruction(instruction.id)
-                        setDragSession({
-                          instructionId: instruction.id,
-                          mode: 'resize-start',
-                          originClientX: event.clientX,
-                          originClientY: event.clientY,
-                        })
-                      }}
-                    />
-
-                    <button
-                      type="button"
-                      className="grid min-w-0 content-center gap-1 px-3 py-2 text-left text-white"
-                      onClick={() => handleSelectInstruction(instruction.id)}
-                      onContextMenu={(event) => {
-                        event.preventDefault()
-                        selectInstruction(instruction.id)
-                        setContextMenu({
-                          instructionId: instruction.id,
-                          x: event.clientX,
-                          y: event.clientY,
-                        })
-                      }}
-                      onPointerDown={(event) => {
-                        if (event.button !== 0) {
-                          return
-                        }
-
-                        selectInstruction(instruction.id)
-                        setDragSession({
-                          instructionId: instruction.id,
-                          mode: 'move',
-                          originClientX: event.clientX,
-                          originClientY: event.clientY,
-                        })
+                  return (
+                    <article
+                      key={instruction.id}
+                      data-clip-block="true"
+                      className={`absolute grid grid-cols-[10px_minmax(0,1fr)_10px] items-stretch overflow-hidden rounded-[18px] border bg-gradient-to-br transition hover:-translate-y-0.5 hover:brightness-110 ${base} ${border} ${ring} ${instruction.enabled ? 'opacity-100' : 'opacity-45 grayscale-[0.2]'}`}
+                      style={{
+                        left: `${left}px`,
+                        top: `${top}px`,
+                        width: `${width}px`,
+                        height: `${CLIP_HEIGHT}px`,
                       }}
                     >
-                      <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/70">
-                        Event {String(index + 1).padStart(2, '0')}
-                      </span>
-                      <strong className="truncate text-sm font-semibold">{formatInstructionLabel(instruction)}</strong>
-                      <small className="truncate text-xs text-white/75">
-                        {instruction.note || `${segment.duration.toFixed(1)}s hold`}
-                      </small>
-                    </button>
+                      <button
+                        type="button"
+                        className="cursor-ew-resize bg-gradient-to-r from-white/35 to-transparent"
+                        aria-label={`Resize start for ${formatInstructionLabel(instruction)}`}
+                        onPointerDown={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          selectInstruction(instruction.id)
+                          setDragSession({
+                            instructionId: instruction.id,
+                            mode: 'resize-start',
+                            originClientX: event.clientX,
+                            originClientY: event.clientY,
+                          })
+                        }}
+                      />
 
-                    <button
-                      type="button"
-                      className="cursor-ew-resize bg-gradient-to-l from-white/35 to-transparent"
-                      aria-label={`Resize end for ${formatInstructionLabel(instruction)}`}
-                      onPointerDown={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        selectInstruction(instruction.id)
-                        setDragSession({
-                          instructionId: instruction.id,
-                          mode: 'resize-end',
-                          originClientX: event.clientX,
-                          originClientY: event.clientY,
-                        })
-                      }}
-                    />
-                  </article>
-                )
-              })}
+                      <button
+                        type="button"
+                        className="grid min-w-0 content-center gap-1.5 px-3 py-2 text-left text-white"
+                        onClick={() => handleSelectInstruction(instruction.id)}
+                        onContextMenu={(event) => {
+                          event.preventDefault()
+                          selectInstruction(instruction.id)
+                          setContextMenu({
+                            instructionId: instruction.id,
+                            x: event.clientX,
+                            y: event.clientY,
+                          })
+                        }}
+                        onPointerDown={(event) => {
+                          if (event.button !== 0) {
+                            return
+                          }
+
+                          selectInstruction(instruction.id)
+                          setDragSession({
+                            instructionId: instruction.id,
+                            mode: 'move',
+                            originClientX: event.clientX,
+                            originClientY: event.clientY,
+                          })
+                        }}
+                      >
+                        <div className="flex min-w-0 items-center justify-between gap-2">
+                          <span className="truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-white/70">
+                            Event {String(index + 1).padStart(2, '0')}
+                          </span>
+                          <span className="shrink-0 rounded-full border border-white/12 bg-black/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/80">
+                            {segment.duration.toFixed(1)}s
+                          </span>
+                        </div>
+                        <strong className="truncate text-sm font-semibold">{formatInstructionLabel(instruction)}</strong>
+                        <div className="flex min-w-0 items-center gap-2">
+                          {overlapTag ? (
+                            <span className="shrink-0 rounded-full border border-white/12 bg-amber-300/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-100">
+                              Cut
+                            </span>
+                          ) : null}
+                          {!instruction.enabled ? (
+                            <span className="shrink-0 rounded-full border border-white/12 bg-black/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-200/85">
+                              Disabled
+                            </span>
+                          ) : null}
+                          <small className="truncate text-xs text-white/75">
+                            {instruction.note || overlapTag || `${segment.duration.toFixed(1)}s hold`}
+                          </small>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="cursor-ew-resize bg-gradient-to-l from-white/35 to-transparent"
+                        aria-label={`Resize end for ${formatInstructionLabel(instruction)}`}
+                        onPointerDown={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          selectInstruction(instruction.id)
+                          setDragSession({
+                            instructionId: instruction.id,
+                            mode: 'resize-end',
+                            originClientX: event.clientX,
+                            originClientY: event.clientY,
+                          })
+                        }}
+                      />
+                    </article>
+                  )
+                })}
                 {(run?.failureMarkers ?? []).map((marker) => {
                   const markerLeft = TRACK_PADDING + marker.time * pixelsPerSecond - 6
                   return (
@@ -752,7 +796,7 @@ export function TimelinePanel() {
                       title={marker.message}
                     >
                       <span
-                        className={`block h-3 w-3 rounded-full ${
+                        className={`block h-3.5 w-3.5 rounded-full ring-2 ring-[#08111d] ${
                           marker.type === 'collision'
                             ? marker.severity === 'hard'
                               ? 'bg-rose-500'
@@ -765,7 +809,7 @@ export function TimelinePanel() {
                         }`}
                       />
                       {physicsDebugEnabled && marker.type === 'collision' && marker.rawContactCount ? (
-                        <span className="absolute left-1/2 top-4 -translate-x-1/2 text-[9px] font-semibold text-slate-300">
+                        <span className="absolute left-1/2 top-5 -translate-x-1/2 rounded-full bg-[#08111d] px-1.5 py-0.5 text-[9px] font-semibold text-slate-300">
                           {marker.rawContactCount}
                         </span>
                       ) : null}
@@ -784,7 +828,7 @@ export function TimelinePanel() {
                       }}
                       title={`Checkpoint ${checkpoint.order} hit`}
                     >
-                      <span className="block h-3 w-3 rounded-full bg-emerald-300" />
+                      <span className="block h-3.5 w-3.5 rounded-full bg-emerald-300 ring-2 ring-[#08111d]" />
                     </div>
                   ))}
                 {displaySegments
@@ -809,9 +853,29 @@ export function TimelinePanel() {
         </div>
       </div>
 
-      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-        Drag clips to slide or resize. Scrub the ruler to review replay. Markers show failures and checkpoints. Cyan tails show carry windows.
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-white/8 pt-4">
+        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+          Drag clips to slide or resize. Scrub the ruler to review replay. Markers show failures and checkpoints. Cyan tails show carry windows.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/8 bg-white/[0.03] px-3 py-1.5 text-[11px] text-slate-300">
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-300" />
+            Checkpoint
+          </span>
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/8 bg-white/[0.03] px-3 py-1.5 text-[11px] text-slate-300">
+            <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
+            Warning
+          </span>
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/8 bg-white/[0.03] px-3 py-1.5 text-[11px] text-slate-300">
+            <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
+            Collision
+          </span>
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/8 bg-white/[0.03] px-3 py-1.5 text-[11px] text-slate-300">
+            <span className="h-2.5 w-8 rounded-full bg-gradient-to-r from-cyan-300/60 to-transparent" />
+            Carry
+          </span>
+        </div>
+      </div>
 
       {contextMenu ? (
         <div

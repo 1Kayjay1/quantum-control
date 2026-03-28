@@ -31,6 +31,7 @@ export type FieldObjectType =
   | 'tunnel'
   | 'flyThroughPanel'
   | 'colorMat'
+  | 'programmingMat'
   | 'landingPad'
   | 'cubeLarge'
   | 'cubeSmall'

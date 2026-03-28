@@ -9,6 +9,52 @@ function formatMs(value: number) {
   return `${Math.round(value)} ms`
 }
 
+function Section({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string
+  subtitle: string
+  children: React.ReactNode
+}) {
+  return (
+    <section className="grid gap-4 border-t border-white/8 pt-5 first:border-t-0 first:pt-0">
+      <div className="grid gap-1">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-300">{title}</h2>
+        <p className="text-sm leading-6 text-slate-500">{subtitle}</p>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function StatTile({
+  label,
+  value,
+  tone = 'default',
+}: {
+  label: string
+  value: string
+  tone?: 'default' | 'accent' | 'success' | 'danger'
+}) {
+  const toneClass =
+    tone === 'accent'
+      ? 'text-amber-200'
+      : tone === 'success'
+        ? 'text-emerald-200'
+        : tone === 'danger'
+          ? 'text-rose-200'
+          : 'text-stone-100'
+
+  return (
+    <div className="grid gap-1 rounded-2xl border border-white/8 bg-white/[0.025] px-3.5 py-3">
+      <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">{label}</span>
+      <strong className={`text-sm font-semibold ${toneClass}`}>{value}</strong>
+    </div>
+  )
+}
+
 export function SimulationPanel() {
   const {
     run,
@@ -39,17 +85,17 @@ export function SimulationPanel() {
   const checkpointCount = run?.checkpointResults.length ?? 0
 
   return (
-    <section className="grid gap-8">
-      <div className="grid gap-4">
-        <div className="grid gap-1">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">Simulation Pipeline</h2>
-          <p className="text-sm leading-6 text-slate-500">
-            {isSolving ? 'Live solve progress.' : 'Current solver pass and replay readiness.'}
-          </p>
-        </div>
+    <div className="grid gap-5">
+      <Section
+        title="Simulation Pipeline"
+        subtitle={isSolving ? 'Live solver progress.' : 'Solve stages and replay readiness.'}
+      >
         <div className="grid gap-3">
           {simulationPipeline.map((stage) => (
-            <div key={stage.id} className="grid grid-cols-[12px_minmax(0,1fr)_auto] items-center gap-3">
+            <div
+              key={stage.id}
+              className="grid grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2.5"
+            >
               <span
                 className={`h-2.5 w-2.5 rounded-full ${
                   stage.status === 'completed'
@@ -62,81 +108,58 @@ export function SimulationPanel() {
                 }`}
               />
               <span className="text-sm text-slate-300">{stage.label}</span>
-              <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
                 {stage.status}
               </span>
             </div>
           ))}
         </div>
-      </div>
+      </Section>
 
-      <div className="grid gap-4">
-        <div className="grid gap-1">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">Replay Telemetry</h2>
-          <p className="text-sm leading-6 text-slate-500">
-            Real-time trace values from the completed run.
-          </p>
+      <Section
+        title="Replay Telemetry"
+        subtitle="Current trace values at the playhead."
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <StatTile label="Time" value={`${playbackTime.toFixed(2)} s`} tone="accent" />
+          <StatTile label="Speed" value={`${activeTrace?.actualSpeed.toFixed(1) ?? '0.0'} cm/s`} />
+          <StatTile label="Heading" value={`${activeTrace?.actualHeading.toFixed(0) ?? '0'} deg`} />
+          <StatTile label="Altitude" value={`${activeTrace?.actualPosition.y.toFixed(1) ?? '0.0'} cm`} />
+          <StatTile label="Drift" value={`${drift.toFixed(1)} cm`} />
+          <StatTile label="Checkpoint" value={`${checkpointHits}/${checkpointCount}`} tone={checkpointHits === checkpointCount && checkpointCount > 0 ? 'success' : 'default'} />
         </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Time</span>
-            <strong className="text-sm text-stone-100">{playbackTime.toFixed(2)} s</strong>
-          </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Speed</span>
-            <strong className="text-sm text-stone-100">{activeTrace?.actualSpeed.toFixed(1) ?? '0.0'} cm/s</strong>
-          </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Heading</span>
-            <strong className="text-sm text-stone-100">{activeTrace?.actualHeading.toFixed(0) ?? '0'} deg</strong>
-          </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Altitude</span>
-            <strong className="text-sm text-stone-100">{activeTrace?.actualPosition.y.toFixed(1) ?? '0.0'} cm</strong>
-          </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Drift</span>
-            <strong className="text-sm text-stone-100">{drift.toFixed(1)} cm</strong>
-          </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Checkpoint Status</span>
-            <strong className="text-sm text-stone-100">{checkpointHits}/{checkpointCount}</strong>
-          </div>
-        </div>
-      </div>
+      </Section>
 
-      <div className="grid gap-4">
-        <div className="grid gap-1">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">Mission Status</h2>
-          <p className="text-sm leading-6 text-slate-500">
-            Ordered checkpoint state, route validity, and landing evaluation.
-          </p>
-        </div>
+      <Section
+        title="Mission Status"
+        subtitle="Checkpoint order, route validity, and landing evaluation."
+      >
         <div className="grid gap-3">
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Route Validity</span>
-            <strong className="text-sm text-stone-100">
-              {run?.metrics.routeValid ? 'Valid' : 'Invalid'}
-            </strong>
-            {run?.metrics.routeInvalidReason ? (
-              <span className="text-sm text-rose-200">{run.metrics.routeInvalidReason}</span>
-            ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <StatTile
+              label="Route Validity"
+              value={run?.metrics.routeValid ? 'Valid' : 'Invalid'}
+              tone={run?.metrics.routeValid ? 'success' : 'danger'}
+            />
+            <StatTile
+              label="Landing"
+              value={run?.landingResult.surface ?? 'none'}
+              tone={run?.landingResult.valid ? 'default' : 'danger'}
+            />
           </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Landing Result</span>
-            <strong className="text-sm text-stone-100">
-              {run?.landingResult.surface ?? 'none'}
-            </strong>
-            <span className="text-sm text-slate-400">{run?.landingResult.message ?? 'No landing result yet.'}</span>
-          </div>
+          {run?.metrics.routeInvalidReason ? (
+            <p className="rounded-2xl border border-rose-400/15 bg-rose-400/8 px-3.5 py-3 text-sm text-rose-100">
+              {run.metrics.routeInvalidReason}
+            </p>
+          ) : null}
           <div className="grid gap-2">
             {(run?.checkpointResults ?? []).map((checkpoint) => (
-              <div key={checkpoint.checkpointId} className="flex items-center justify-between gap-3 text-sm">
+              <div key={checkpoint.checkpointId} className="flex items-center justify-between gap-3 rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2.5 text-sm">
                 <span className="text-slate-300">
                   {checkpoint.order}. {checkpoint.label}
                 </span>
                 <span
-                  className={`text-xs font-semibold uppercase tracking-[0.16em] ${
+                  className={`text-[10px] font-semibold uppercase tracking-[0.2em] ${
                     checkpoint.status === 'hit'
                       ? 'text-emerald-300'
                       : checkpoint.status === 'pending'
@@ -150,99 +173,45 @@ export function SimulationPanel() {
             ))}
           </div>
         </div>
-      </div>
+      </Section>
 
-      <div className="grid gap-4">
-        <div className="grid gap-1">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">Simulation Summary</h2>
-          <p className="text-sm leading-6 text-slate-500">
-            Solve cost and output size without artificially slowing the engine.
-          </p>
+      <Section
+        title="Simulation Summary"
+        subtitle="Solve cost, output size, and repeatability details."
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <StatTile label="Seed" value={String(run?.solveSummary?.seed ?? run?.seed ?? 0)} />
+          <StatTile label="Route Time" value={`${run?.metrics.totalTime.toFixed(2) ?? '0.00'} s`} />
+          <StatTile label="Physics Steps" value={String(run?.solveSummary?.physicsSteps ?? 0)} />
+          <StatTile label="Trace Points" value={String(run?.solveSummary?.tracePoints ?? 0)} />
+          <StatTile label="Checkpoint Checks" value={String(run?.solveSummary?.checkpointChecks ?? 0)} />
+          <StatTile label="Collisions" value={String(run?.metrics.collisionCount ?? 0)} tone={(run?.metrics.collisionCount ?? 0) > 0 ? 'danger' : 'default'} />
+          <StatTile label="Avg Noise" value={run?.solveSummary?.averageNoiseMagnitude?.toFixed(3) ?? '0.000'} />
+          <StatTile label="Drift Accumulation" value={`${run?.solveSummary?.driftAccumulation?.toFixed(1) ?? '0.0'} cm`} />
+          <StatTile label="Monte Carlo Runs" value={String(run?.solveSummary?.monteCarloRuns ?? 0)} />
+          <StatTile label="Wall Clock" value={formatMs(run?.solveSummary?.solveTimeMs ?? 0)} />
         </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Seed</span>
-            <strong className="text-sm text-stone-100">{run?.solveSummary?.seed ?? run?.seed ?? 0}</strong>
-          </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Route Time</span>
-            <strong className="text-sm text-stone-100">{run?.metrics.totalTime.toFixed(2) ?? '0.00'} s</strong>
-          </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Avg Noise</span>
-            <strong className="text-sm text-stone-100">{run?.solveSummary?.averageNoiseMagnitude?.toFixed(3) ?? '0.000'}</strong>
-          </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Physics Steps</span>
-            <strong className="text-sm text-stone-100">{run?.solveSummary?.physicsSteps ?? 0}</strong>
-          </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Trace Points</span>
-            <strong className="text-sm text-stone-100">{run?.solveSummary?.tracePoints ?? 0}</strong>
-          </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Checkpoint Checks</span>
-            <strong className="text-sm text-stone-100">{run?.solveSummary?.checkpointChecks ?? 0}</strong>
-          </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Drift Accumulation</span>
-            <strong className="text-sm text-stone-100">{run?.solveSummary?.driftAccumulation?.toFixed(1) ?? '0.0'} cm</strong>
-          </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Monte Carlo Runs</span>
-            <strong className="text-sm text-stone-100">{run?.solveSummary?.monteCarloRuns ?? 0}</strong>
-          </div>
-          <div className="grid gap-1">
-            <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Wall Clock</span>
-            <strong className="text-sm text-stone-100">{formatMs(run?.solveSummary?.solveTimeMs ?? 0)}</strong>
-          </div>
-        </div>
-      </div>
+      </Section>
 
-      <div className="grid gap-4">
-        <div className="grid gap-1">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">Deep Analysis</h2>
-          <p className="text-sm leading-6 text-slate-500">
-            Multi-seed confidence stats. Current sample target: {monteCarloRuns}.
-          </p>
-        </div>
+      <Section
+        title="Deep Analysis"
+        subtitle={`Confidence stats across seeded runs. Current sample target: ${monteCarloRuns}.`}
+      >
         {deepAnalysis ? (
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="grid gap-1">
-              <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Success Estimate</span>
-              <strong className="text-sm text-stone-100">{deepAnalysis.successEstimate}%</strong>
-            </div>
-            <div className="grid gap-1">
-              <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Avg Deviation</span>
-              <strong className="text-sm text-stone-100">{deepAnalysis.averagePathDeviation.toFixed(1)} cm</strong>
-            </div>
-            <div className="grid gap-1">
-              <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Worst Deviation</span>
-              <strong className="text-sm text-stone-100">{deepAnalysis.worstDeviation.toFixed(1)} cm</strong>
-            </div>
-            <div className="grid gap-1">
-              <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Best / Worst Time</span>
-              <strong className="text-sm text-stone-100">
-                {deepAnalysis.bestTime.toFixed(2)} s / {deepAnalysis.worstTime.toFixed(2)} s
-              </strong>
-            </div>
-            <div className="grid gap-1">
-              <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Collision Range</span>
-              <strong className="text-sm text-stone-100">
-                {deepAnalysis.collisionCountMin} - {deepAnalysis.collisionCountMax}
-              </strong>
-            </div>
-            <div className="grid gap-1">
-              <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Consistency Spread</span>
-              <strong className="text-sm text-stone-100">{deepAnalysis.consistencySpread.toFixed(2)}</strong>
-            </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <StatTile label="Success Estimate" value={`${deepAnalysis.successEstimate}%`} tone="accent" />
+            <StatTile label="Avg Deviation" value={`${deepAnalysis.averagePathDeviation.toFixed(1)} cm`} />
+            <StatTile label="Worst Deviation" value={`${deepAnalysis.worstDeviation.toFixed(1)} cm`} tone="danger" />
+            <StatTile label="Best / Worst Time" value={`${deepAnalysis.bestTime.toFixed(2)} s / ${deepAnalysis.worstTime.toFixed(2)} s`} />
+            <StatTile label="Collision Range" value={`${deepAnalysis.collisionCountMin} - ${deepAnalysis.collisionCountMax}`} />
+            <StatTile label="Consistency Spread" value={deepAnalysis.consistencySpread.toFixed(2)} />
           </div>
         ) : (
-          <p className="text-sm leading-6 text-slate-500">
+          <p className="rounded-2xl border border-white/6 bg-white/[0.02] px-3.5 py-3 text-sm leading-6 text-slate-500">
             Run Deep Analysis to compute confidence across 25, 50, or 100 seeded simulations.
           </p>
         )}
-      </div>
-    </section>
+      </Section>
+    </div>
   )
 }

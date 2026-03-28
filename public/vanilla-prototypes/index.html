@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quantum Control Layout Prototypes</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-prototype="a" class="is-topbar-collapsed">
+    <div class="prototype-app" id="prototype-app">
+      <header class="topbar">
+        <div class="brand-cluster">
+          <div class="wordmark-block">
+            <span class="wordmark">Quantum Control</span>
+            <strong class="project-title">Quantum Control Demo</strong>
+            <span class="project-subtitle">Manual-only route planning and simulation workspace.</span>
+          </div>
+          <label class="project-picker">
+            <span class="label">Project</span>
+            <button class="control project-control">Quantum Control Demo</button>
+          </label>
+        </div>
+
+        <div class="primary-cluster">
+          <div class="control-group">
+            <span class="label">Prototype</span>
+            <div class="segmented" id="prototype-switcher">
+              <button class="segment is-active" data-prototype-target="a">A</button>
+              <button class="segment" data-prototype-target="b">B</button>
+              <button class="segment" data-prototype-target="c">C</button>
+            </div>
+          </div>
+          <div class="control-group">
+            <span class="label">Workspace</span>
+            <div class="segmented">
+              <button class="segment is-active">Editor</button>
+              <button class="segment">Scene</button>
+            </div>
+          </div>
+          <div class="control-group">
+            <span class="label">Sim</span>
+            <button class="control compact">Quick Sim</button>
+          </div>
+          <button class="control primary">Run Simulation</button>
+          <div class="transport-group">
+            <button class="control compact">Play</button>
+            <button class="control compact">Reset</button>
+            <button class="control compact">1x</button>
+          </div>
+        </div>
+
+        <div class="secondary-cluster">
+          <button class="control compact" data-toggle="topbar">Top Bar</button>
+          <button class="control compact" data-toggle="debug">Physics Debug</button>
+          <button class="control compact" data-toggle="inspector">Inspector</button>
+          <button class="control compact">Save</button>
+          <button class="control compact">Export</button>
+          <button class="control compact">Sheet</button>
+          <button class="control compact">Import</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="left-rail" id="left-rail">
+          <div class="rail-header">
+            <div>
+              <span class="label">Editor Rail</span>
+              <h1 class="panel-title">Build Route</h1>
+              <p class="helper">Fast control entry, field placement, and timing review.</p>
+            </div>
+            <button class="ghost-button" data-toggle="rail">Collapse</button>
+          </div>
+
+          <section class="rail-section">
+            <h2 class="section-title">Flight Controls</h2>
+            <div class="tool-grid">
+              <button class="tool-card"><strong>Takeoff</strong><span>Lift into route.</span></button>
+              <button class="tool-card"><strong>Forward</strong><span>Pitch forward.</span></button>
+              <button class="tool-card"><strong>Backward</strong><span>Pitch backward.</span></button>
+              <button class="tool-card"><strong>Yaw Left</strong><span>Rotate left.</span></button>
+              <button class="tool-card"><strong>Yaw Right</strong><span>Rotate right.</span></button>
+              <button class="tool-card"><strong>Right Roll</strong><span>Strafe right.</span></button>
+            </div>
+          </section>
+
+          <section class="rail-section">
+            <h2 class="section-title">Movement</h2>
+            <div class="tool-grid compact-grid">
+              <button class="tool-card"><strong>Up</strong><span>Throttle up.</span></button>
+              <button class="tool-card"><strong>Down</strong><span>Throttle down.</span></button>
+              <button class="tool-card"><strong>Hover</strong><span>Stabilize in place.</span></button>
+              <button class="tool-card"><strong>Land</strong><span>Finish and settle.</span></button>
+            </div>
+          </section>
+
+          <section class="rail-section">
+            <h2 class="section-title">Field Tools</h2>
+            <div class="tool-grid compact-grid">
+              <button class="tool-card"><strong>Wall</strong><span>Boundary or blocker.</span></button>
+              <button class="tool-card"><strong>Arch Gate</strong><span>Mission gate.</span></button>
+              <button class="tool-card"><strong>Tunnel</strong><span>Straight tunnel.</span></button>
+              <button class="tool-card"><strong>Landing Pad</strong><span>Target zone.</span></button>
+            </div>
+          </section>
+
+          <label class="toggle-row">
+            <span>
+              <strong>Snap to grid</strong>
+              <small>Keep placements aligned to the course.</small>
+            </span>
+            <input type="checkbox" checked />
+          </label>
+        </aside>
+
+        <section class="scene-stage">
+          <div class="viewport" id="viewport">
+            <div class="scene-canvas">
+              <div class="scene-grid"></div>
+              <div class="scene-arch"></div>
+              <div class="scene-ring"></div>
+              <div class="scene-path"></div>
+              <div class="scene-drone"></div>
+
+              <section class="telemetry-card" id="telemetry-card">
+                <div class="telemetry-header">
+                  <span class="label">Viewport Telemetry</span>
+                  <span class="status-chip">Idle</span>
+                </div>
+                <div class="telemetry-grid">
+                  <div><span>Time</span><strong>1.68s</strong></div>
+                  <div><span>Speed</span><strong>1.8</strong></div>
+                  <div><span>Heading</span><strong>155°</strong></div>
+                  <div><span>Altitude</span><strong>0.42m</strong></div>
+                  <div><span>Drift</span><strong>12cm</strong></div>
+                  <div><span>Checkpoints</span><strong>3/4</strong></div>
+                </div>
+              </section>
+
+              <div class="scene-overlay replay-controls">
+                <span class="label">Replay</span>
+                <button class="control compact">Back 5s</button>
+                <button class="control compact">Play</button>
+                <button class="control compact">Forward 5s</button>
+                <span class="chip">Frame 72/101</span>
+              </div>
+
+              <div class="scene-overlay object-hint">
+                <span class="label">Object Edit</span>
+                <span class="chip wide-chip">Wall selected | drag to move | Shift = X axis | Ctrl = Z axis | arrows = nudge / height</span>
+              </div>
+
+              <div class="scene-overlay legend-chips">
+                <span class="label">Legend</span>
+                <span class="chip marker checkpoint">Checkpoint</span>
+                <span class="chip marker warning">Warning</span>
+                <span class="chip marker collision">Collision</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside class="inspector" id="inspector">
+          <div class="inspector-header">
+            <div>
+              <span class="label">Inspector Drawer</span>
+              <h2 class="panel-title">Context</h2>
+            </div>
+            <button class="ghost-button" data-toggle="inspector">Collapse</button>
+          </div>
+
+          <div class="segmented tabs">
+            <button class="segment is-active">Summary</button>
+            <button class="segment">Inspector</button>
+            <button class="segment">Setup</button>
+          </div>
+
+          <section class="inspector-card">
+            <h3 class="section-title">Event Settings</h3>
+            <div class="field-stack">
+              <label><span>Action label</span><div class="field">Yaw Left</div></label>
+              <label><span>Duration</span><div class="field">0.60 s</div></label>
+              <label><span>Strength</span><div class="field">68</div></label>
+              <label><span>Delay after</span><div class="field">0.20 s</div></label>
+            </div>
+          </section>
+
+          <section class="inspector-card">
+            <h3 class="section-title">Control Values</h3>
+            <div class="field-stack two-col">
+              <label><span>Stack next by</span><div class="field">0.15 s</div></label>
+              <label><span>Enabled</span><div class="field">Yes</div></label>
+              <label><span>Version tag</span><div class="field">baseline</div></label>
+              <label><span>Type</span><div class="field">Control</div></label>
+            </div>
+          </section>
+
+          <section class="inspector-card">
+            <h3 class="section-title">Metadata</h3>
+            <div class="field-stack">
+              <label><span>Step note</span><div class="field multiline">Rotate into the keyhole line, then settle before throttle.</div></label>
+            </div>
+          </section>
+        </aside>
+      </main>
+
+      <section class="timeline-dock panel" id="timeline-dock">
+        <div class="timeline-topbar">
+          <div class="timeline-heading">
+            <span class="label">Event Timeline</span>
+            <p class="helper">Readable timing, overlap, and replay review.</p>
+          </div>
+          <div class="timeline-meta">
+            <div><span class="label">Route</span><strong>Route A - Baseline</strong></div>
+            <div><span class="label">Selection</span><strong>Yaw Left</strong></div>
+            <div class="zoom-controls">
+              <button class="control compact">-</button>
+              <span class="chip">100% zoom</span>
+              <button class="control compact">+</button>
+            </div>
+          </div>
+          <button class="ghost-button" data-toggle="timeline">Collapse</button>
+        </div>
+
+        <div class="timeline-body">
+          <aside class="lane-labels">
+            <div class="lane-title">Tracks</div>
+            <div class="lane-label"><span class="lane-dot pitch"></span><strong>Pitch</strong><small>Forward / back</small></div>
+            <div class="lane-label"><span class="lane-dot roll"></span><strong>Roll</strong><small>Left / right</small></div>
+            <div class="lane-label"><span class="lane-dot throttle"></span><strong>Throttle</strong><small>Up / down</small></div>
+            <div class="lane-label"><span class="lane-dot yaw"></span><strong>Yaw</strong><small>Rotate</small></div>
+            <div class="lane-label"><span class="lane-dot hover"></span><strong>Hover</strong><small>Wait / hold</small></div>
+            <div class="lane-label"><span class="lane-dot markers"></span><strong>Markers</strong><small>Hits / fail</small></div>
+          </aside>
+
+          <div class="timeline-track">
+            <div class="ruler">
+              <span>0.0s</span>
+              <span>0.8s</span>
+              <span>1.6s</span>
+              <span>2.4s</span>
+              <span>3.2s</span>
+            </div>
+            <div class="playhead"></div>
+            <div class="track-lanes">
+              <div class="track-row">
+                <div class="event pitch-event" style="left: 32px; width: 210px;">
+                  <span class="event-tag">Event 01</span>
+                  <strong>Pitch Forward</strong>
+                  <small>0.80s hold</small>
+                </div>
+                <div class="carry-tail" style="left: 242px; width: 70px;"></div>
+              </div>
+              <div class="track-row">
+                <div class="event roll-event selected" style="left: 128px; width: 168px;">
+                  <span class="event-tag">Event 02</span>
+                  <strong>Right Roll</strong>
+                  <small>0.60s overlap</small>
+                </div>
+              </div>
+              <div class="track-row">
+                <div class="event throttle-event" style="left: 302px; width: 188px;">
+                  <span class="event-tag">Event 03</span>
+                  <strong>Throttle Up</strong>
+                  <small>0.70s hold</small>
+                </div>
+              </div>
+              <div class="track-row">
+                <div class="event yaw-event current" style="left: 228px; width: 142px;">
+                  <span class="event-tag">Event 04</span>
+                  <strong>Yaw Left</strong>
+                  <small>0.60s hold</small>
+                </div>
+              </div>
+              <div class="track-row">
+                <div class="event hover-event disabled" style="left: 428px; width: 150px;">
+                  <span class="event-tag">Event 05</span>
+                  <strong>Hover</strong>
+                  <small>Disabled</small>
+                </div>
+              </div>
+              <div class="track-row markers-row">
+                <span class="marker checkpoint-marker" style="left: 184px;"></span>
+                <span class="marker warning-marker" style="left: 308px;"></span>
+                <span class="marker collision-marker" style="left: 392px;"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="timeline-footer">
+          <span class="chip marker checkpoint">Checkpoint</span>
+          <span class="chip marker warning">Warning</span>
+          <span class="chip marker collision">Collision</span>
+          <span class="chip marker carry">Carry</span>
+        </div>
+      </section>
+    </div>
+
+    <script src="./main.js"></script>
+  </body>
+</html>

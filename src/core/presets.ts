@@ -103,6 +103,17 @@ export const FIELD_OBJECT_LIBRARY: FieldObjectPreset[] = [
     color: '#2563eb',
   },
   {
+    type: 'programmingMat',
+    title: 'Programming Mat',
+    description: 'Patterned vinyl mat for setup and sensor readings.',
+    size: {
+      x: OFFICIAL_FIELD_DIMENSIONS_CM.programmingMat.width,
+      y: OFFICIAL_FIELD_DIMENSIONS_CM.colorMat.thickness,
+      z: OFFICIAL_FIELD_DIMENSIONS_CM.programmingMat.height,
+    },
+    color: '#64748b',
+  },
+  {
     type: 'landingPad',
     title: 'Landing Pad',
     description: 'Official landing pad with bullseye validation.',
@@ -265,6 +276,10 @@ export function createFieldObject(type: FieldObjectType, offset = 0): FieldObjec
       fieldObject.position.y = preset.size.y * 0.5
       fieldObject.colorTag = 'blue'
       fieldObject.detectionDelayMs = 0
+      fieldObject.isSolid = false
+      break
+    case 'programmingMat':
+      fieldObject.position.y = preset.size.y * 0.5
       fieldObject.isSolid = false
       break
     case 'flyThroughPanel':

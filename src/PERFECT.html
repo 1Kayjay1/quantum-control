@@ -1,0 +1,1107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AERO-PLAN // Drone Mission Simulator</title>
+    
+    <!-- Fonts: JetBrains Mono for that aerospace coding feel -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+    
+    <!-- Three.js and OrbitControls from CDN -->
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <style>
+        :root {
+            --bg-dark: #0b0e14;
+            --bg-panel: #151922;
+            --bg-input: #0f1115;
+            --border: #2d3748;
+            --accent: #d97706; /* Amber/Gold */
+            --accent-dim: #92400e;
+            --text-main: #e2e8f0;
+            --text-muted: #718096;
+            
+            /* Command Colors */
+            --col-move: #3182ce; /* Blue */
+            --col-rot: #dd6b20;  /* Amber */
+            --col-wait: #319795; /* Teal */
+            --col-action: #805ad5; /* Purple */
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'JetBrains Mono', monospace;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            font-size: 13px;
+        }
+
+        /* --- Header --- */
+        header {
+            height: 50px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            justify-content: space-between;
+        }
+
+        .brand {
+            font-weight: 700;
+            color: var(--accent);
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .top-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        select {
+            background: var(--bg-input);
+            color: var(--text-main);
+            border: 1px solid var(--border);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: inherit;
+            cursor: pointer;
+        }
+
+        .sim-btn {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            padding: 6px 16px;
+            font-weight: 700;
+            border-radius: 2px;
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+        .sim-btn:hover { background: #f59e0b; }
+        .sim-btn.secondary { background: var(--bg-input); color: var(--text-main); border: 1px solid var(--border); }
+        .sim-btn.secondary:hover { border-color: var(--text-muted); }
+
+        /* --- Main Layout --- */
+        main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 260px 1fr 280px;
+            grid-template-rows: 1fr 200px;
+            overflow: hidden;
+        }
+
+        /* Panels */
+        .panel {
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .panel-right {
+            border-right: none;
+            border-left: 1px solid var(--border);
+        }
+        .panel-header {
+            padding: 10px 12px;
+            background: rgba(0,0,0,0.2);
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 11px;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* --- Left Sidebar: Tools --- */
+        .tools-scroll {
+            overflow-y: auto;
+            padding: 12px;
+            flex: 1;
+        }
+
+        .tool-section { margin-bottom: 24px; }
+        .tool-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .btn-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+
+        .tool-btn {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 8px;
+            text-align: left;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+            font-family: inherit;
+            font-size: 11px;
+        }
+        .tool-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .tool-btn:active { background: var(--border); }
+
+        /* --- 3D Viewport --- */
+        #viewport {
+            grid-column: 2;
+            grid-row: 1;
+            position: relative;
+            background: radial-gradient(circle at center, #1a202c 0%, #0b0e14 100%);
+            overflow: hidden;
+        }
+        #canvas-container { width: 100%; height: 100%; outline: none; }
+
+        .viewport-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            pointer-events: none;
+            color: var(--accent);
+            font-size: 10px;
+            opacity: 0.7;
+        }
+
+        /* --- Right Sidebar: Inspector --- */
+        .inspector-content {
+            padding: 16px;
+            flex: 1;
+            overflow-y: auto;
+        }
+        
+        .prop-group { margin-bottom: 16px; }
+        .prop-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .prop-key { color: var(--text-muted); font-size: 11px; }
+        .prop-input {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--accent);
+            padding: 4px 8px;
+            width: 80px;
+            text-align: right;
+            font-family: inherit;
+            border-radius: 2px;
+        }
+        .prop-input:focus { outline: 1px solid var(--accent); }
+
+        /* --- Bottom: Timeline & Telemetry --- */
+        #bottom-area {
+            grid-column: 1 / span 3;
+            grid-row: 2;
+            background: var(--bg-panel);
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Telemetry Bar */
+        .telemetry-bar {
+            height: 36px;
+            background: #0f1115;
+            display: flex;
+            border-bottom: 1px solid var(--border);
+        }
+        .tele-item {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            border-right: 1px solid var(--border);
+            font-size: 11px;
+        }
+        .tele-label { color: var(--text-muted); margin-right: 8px; text-transform: uppercase; }
+        .tele-val { color: var(--accent); font-weight: 700; }
+
+        /* Timeline */
+        .timeline-container {
+            flex: 1;
+            position: relative;
+            overflow-x: auto;
+            overflow-y: hidden;
+            background: var(--bg-panel);
+        }
+        .timeline-tracks {
+            position: relative;
+            height: 100%;
+            min-width: 100%;
+            padding-top: 20px; /* space for playhead handle */
+        }
+        
+        /* Playhead */
+        .playhead {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #ff4757;
+            z-index: 10;
+            pointer-events: none;
+            transition: left 0.05s linear;
+        }
+        .playhead::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -5px;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-top: 8px solid #ff4757;
+        }
+
+        /* Blocks */
+        .track-lane {
+            height: 40px;
+            position: relative;
+            border-bottom: 1px solid #1e2530;
+            margin-top: 10px;
+        }
+        
+        .inst-block {
+            position: absolute;
+            height: 30px;
+            top: 5px;
+            border-radius: 4px;
+            border: 1px solid rgba(255,255,255,0.1);
+            color: #fff;
+            font-size: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 0 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .inst-block:hover { filter: brightness(1.2); z-index: 5; }
+        .inst-block.selected { border-color: #fff; box-shadow: 0 0 0 2px var(--bg-dark), 0 0 0 4px var(--accent); }
+
+        .type-move { background: var(--col-move); }
+        .type-rot { background: var(--col-rot); }
+        .type-wait { background: var(--col-wait); }
+        .type-action { background: var(--col-action); }
+
+        /* Utility */
+        .empty-state {
+            color: var(--text-muted);
+            font-style: italic;
+            font-size: 11px;
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        /* Toast Notification */
+        #toast {
+            position: fixed;
+            bottom: 220px;
+            right: 20px;
+            background: var(--accent);
+            color: #000;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: 700;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="brand">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 12h3v8h6v-6h2v6h6v-8h3L12 2z"/></svg>
+            AERO-PLAN <span style="color:var(--text-muted); font-weight:300;">// FLIGHT SIM</span>
+        </div>
+        
+        <div class="top-controls">
+            <select id="route-select">
+                <option>Route Alpha (Default)</option>
+                <option>Route Beta (Test)</option>
+                <option>Custom Route...</option>
+            </select>
+            <select id="layout-select">
+                <option>Empty Field</option>
+                <option>Obstacle Course A</option>
+                <option>City Park</option>
+            </select>
+            <div style="width: 1px; height: 20px; background: var(--border);"></div>
+            <button class="sim-btn secondary" id="reset-cam">Reset Cam</button>
+            <button class="sim-btn" id="btn-simulate">SIMULATE</button>
+        </div>
+    </header>
+
+    <main>
+        <!-- LEFT SIDEBAR -->
+        <aside class="panel">
+            <div class="panel-header">
+                <span>Mission Builder</span>
+                <span>Tools</span>
+            </div>
+            <div class="tools-scroll">
+                
+                <div class="tool-section">
+                    <span class="tool-label">Flight Instructions</span>
+                    <div class="btn-grid">
+                        <button class="tool-btn" onclick="app.addInstruction('takeoff')">Takeoff</button>
+                        <button class="tool-btn" onclick="app.addInstruction('land')">Land</button>
+                        <button class="tool-btn" onclick="app.addInstruction('hover')">Hover</button>
+                        <button class="tool-btn" onclick="app.addInstruction('wait')">Wait</button>
+                        <button class="tool-btn" onclick="app.addInstruction('move_fwd')">Fwd</button>
+                        <button class="tool-btn" onclick="app.addInstruction('move_back')">Back</button>
+                        <button class="tool-btn" onclick="app.addInstruction('strafe_l')">Left</button>
+                        <button class="tool-btn" onclick="app.addInstruction('strafe_r')">Right</button>
+                        <button class="tool-btn" onclick="app.addInstruction('rot_cw')">Rot CW</button>
+                        <button class="tool-btn" onclick="app.addInstruction('rot_ccw')">Rot CCW</button>
+                        <button class="tool-btn" onclick="app.addInstruction('move_up')">Up</button>
+                        <button class="tool-btn" onclick="app.addInstruction('move_down')">Down</button>
+                    </div>
+                </div>
+
+                <div class="tool-section">
+                    <span class="tool-label">Field Objects</span>
+                    <div class="btn-grid">
+                        <button class="tool-btn" onclick="app.addSceneObject('arch_gate')">Arch Gate</button>
+                        <button class="tool-btn" onclick="app.addSceneObject('keyhole_gate')">Keyhole</button>
+                        <button class="tool-btn" onclick="app.addSceneObject('tunnel')">Tunnel</button>
+                        <button class="tool-btn" onclick="app.addSceneObject('landing_pad')">Landing Pad</button>
+                        <button class="tool-btn" onclick="app.addSceneObject('wall')">Wall</button>
+                        <button class="tool-btn" onclick="app.addSceneObject('pillar')">Pillar</button>
+                        <button class="tool-btn" onclick="app.addSceneObject('cube_small')">Cube (S)</button>
+                        <button class="tool-btn" onclick="app.addSceneObject('cube_large')">Cube (L)</button>
+                    </div>
+                </div>
+
+            </div>
+        </aside>
+
+        <!-- CENTER VIEWPORT -->
+        <section id="viewport">
+            <div id="canvas-container"></div>
+            <div class="viewport-overlay">
+                CAM: ORBIT<br>
+                GRID: 50m<br>
+                STATUS: READY
+            </div>
+        </section>
+
+        <!-- RIGHT SIDEBAR -->
+        <aside class="panel panel-right">
+            <div class="panel-header">
+                <span>Inspector</span>
+                <span>Properties</span>
+            </div>
+            <div class="inspector-content" id="inspector-content">
+                <div class="empty-state">Select an instruction or object to edit properties.</div>
+            </div>
+        </aside>
+
+        <!-- BOTTOM AREA -->
+        <section id="bottom-area">
+            <!-- Telemetry -->
+            <div class="telemetry-bar">
+                <div class="tele-item"><span class="tele-label">Speed</span><span class="tele-val" id="val-speed">0.0 m/s</span></div>
+                <div class="tele-item"><span class="tele-label">Alt</span><span class="tele-val" id="val-alt">0.0 m</span></div>
+                <div class="tele-item"><span class="tele-label">Heading</span><span class="tele-val" id="val-head">0°</span></div>
+                <div class="tele-item"><span class="tele-label">Drift</span><span class="tele-val" id="val-drift">0.0</span></div>
+                <div class="tele-item"><span class="tele-label">Time</span><span class="tele-val" id="val-time">0.00s</span></div>
+                <div style="flex:2; display:flex; align-items:center; padding:0 16px; gap:10px; justify-content:flex-end;">
+                    <span class="tele-label">SPEED:</span>
+                    <button class="sim-btn secondary" style="padding:2px 6px; font-size:10px;" onclick="app.setSpeed(0.5)">0.5x</button>
+                    <button class="sim-btn secondary" style="padding:2px 6px; font-size:10px;" onclick="app.setSpeed(1)">1x</button>
+                    <button class="sim-btn secondary" style="padding:2px 6px; font-size:10px;" onclick="app.setSpeed(2)">2x</button>
+                </div>
+            </div>
+
+            <!-- Timeline -->
+            <div class="timeline-container" id="timeline-scroll">
+                <div class="timeline-tracks" id="timeline-tracks">
+                    <div class="playhead" id="playhead"></div>
+                    <div class="track-lane" id="instruction-track"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="toast">Action Completed</div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Configuration ---
+        const CONFIG = {
+            colors: {
+                move: 0x3182ce,
+                rot: 0xdd6b20,
+                wait: 0x319795,
+                action: 0x805ad5,
+                grid: 0x2d3748,
+                drone: 0xe2e8f0,
+                pathPlan: 0x4a5568,
+                pathActual: 0xd97706
+            },
+            scale: 100 // pixels per second on timeline
+        };
+
+        // --- State Management ---
+        const state = {
+            instructions: [], // { id, type, duration, value, label, colorType }
+            sceneObjects: [], // { id, type, mesh, data }
+            selection: null, // { type: 'instruction'|'object', id }
+            simulation: {
+                isPlaying: false,
+                currentTime: 0,
+                totalDuration: 0,
+                speed: 1,
+                lastFrameTime: 0
+            },
+            drone: {
+                mesh: null,
+                pathPlanLine: null,
+                pathActualLine: null,
+                actualHistory: []
+            }
+        };
+
+        // --- Three.js Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x0b0e14, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
+        camera.position.set(8, 5, 8);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below floor
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // Grid Floor
+        const gridHelper = new THREE.GridHelper(50, 50, 0x4a5568, 0x1a202c);
+        scene.add(gridHelper);
+        
+        // Floor Plane (for raycasting/shadows)
+        const planeGeo = new THREE.PlaneGeometry(50, 50);
+        const planeMat = new THREE.MeshStandardMaterial({ color: 0x0b0e14, roughness: 0.8 });
+        const floor = new THREE.Mesh(planeGeo, planeMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        floor.position.y = -0.01;
+        scene.add(floor);
+
+        // --- Drone Model ---
+        function createDrone() {
+            const group = new THREE.Group();
+
+            // Body
+            const bodyGeo = new THREE.BoxGeometry(0.4, 0.1, 0.6);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2d3748 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.castShadow = true;
+            group.add(body);
+
+            // Arms & Rotors
+            const armGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.8);
+            const armMat = new THREE.MeshStandardMaterial({ color: 0x718096 });
+            
+            const arm1 = new THREE.Mesh(armGeo, armMat);
+            arm1.rotation.z = Math.PI / 2;
+            arm1.rotation.y = Math.PI / 4;
+            group.add(arm1);
+
+            const arm2 = new THREE.Mesh(armGeo, armMat);
+            arm2.rotation.z = Math.PI / 2;
+            arm2.rotation.y = -Math.PI / 4;
+            group.add(arm2);
+
+            // Rotors
+            const rotorGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.01, 16);
+            const rotorMat = new THREE.MeshBasicMaterial({ color: 0xd97706, transparent:true, opacity:0.8 });
+            
+            const positions = [
+                {x:0.28, z:0.28}, {x:-0.28, z:-0.28},
+                {x:0.28, z:-0.28}, {x:-0.28, z:0.28}
+            ];
+
+            positions.forEach(pos => {
+                const rotor = new THREE.Mesh(rotorGeo, rotorMat);
+                rotor.position.set(pos.x, 0.06, pos.z);
+                group.add(rotor);
+            });
+
+            // Glow light
+            const light = new THREE.PointLight(CONFIG.colors.drone, 1, 5);
+            light.position.set(0, 0.2, 0);
+            group.add(light);
+
+            scene.add(group);
+            return group;
+        }
+
+        state.drone.mesh = createDrone();
+
+        // --- Paths ---
+        const pathPlanMat = new THREE.LineDashedMaterial({ 
+            color: CONFIG.colors.pathPlan, 
+            dashSize: 0.5, 
+            gapSize: 0.2, 
+            opacity: 0.5, 
+            transparent: true 
+        });
+        const pathActualMat = new THREE.LineBasicMaterial({ color: CONFIG.colors.pathActual, linewidth: 2 });
+
+        // --- Logic: Instructions & Simulation ---
+
+        class App {
+            constructor() {
+                this.initEvents();
+                this.animate = this.animate.bind(this);
+                requestAnimationFrame(this.animate);
+                this.updateDroneStartPos();
+            }
+
+            initEvents() {
+                window.addEventListener('resize', () => this.onResize());
+                document.getElementById('btn-simulate').addEventListener('click', () => this.toggleSimulation());
+                document.getElementById('reset-cam').addEventListener('click', () => {
+                    camera.position.set(8, 5, 8);
+                    controls.target.set(0,0,0);
+                });
+                
+                // Interaction (Raycaster)
+                const raycaster = new THREE.Raycaster();
+                const mouse = new THREE.Vector2();
+
+                renderer.domElement.addEventListener('click', (event) => {
+                    const rect = renderer.domElement.getBoundingClientRect();
+                    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+                    raycaster.setFromCamera(mouse, camera);
+                    
+                    // Check Scene Objects
+                    const meshes = state.sceneObjects.map(o => o.mesh);
+                    const intersects = raycaster.intersectObjects(meshes, true); // recursive for groups
+
+                    if (intersects.length > 0) {
+                        // Find root object from our list
+                        let target = intersects[0].object;
+                        while(target.parent && !state.sceneObjects.find(o => o.mesh === target)) {
+                            target = target.parent;
+                        }
+                        const objData = state.sceneObjects.find(o => o.mesh === target);
+                        if(objData) this.selectObject(objData);
+                    } else {
+                        // Deselect if clicked empty space
+                        // this.deselectAll(); 
+                    }
+                });
+            }
+
+            onResize() {
+                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(container.clientWidth, container.clientHeight);
+            }
+
+            // --- Instruction Logic ---
+
+            addInstruction(type) {
+                const id = Date.now();
+                let duration = 1.0;
+                let label = type;
+                let colorType = 'type-action';
+                let value = 0; // distance or degrees
+
+                // Defaults
+                switch(type) {
+                    case 'takeoff': duration = 2.0; label = 'Takeoff'; value = 1.5; break;
+                    case 'land': duration = 2.0; label = 'Land'; value = 0; break;
+                    case 'hover': duration = 2.0; label = 'Hover'; break;
+                    case 'wait': duration = 1.0; label = 'Wait'; break;
+                    case 'move_fwd': duration = 2.0; label = 'Move Fwd'; value = 2; colorType = 'type-move'; break;
+                    case 'move_back': duration = 2.0; label = 'Move Back'; value = -2; colorType = 'type-move'; break;
+                    case 'strafe_l': duration = 2.0; label = 'Strafe L'; value = -2; colorType = 'type-move'; break;
+                    case 'strafe_r': duration = 2.0; label = 'Strafe R'; value = 2; colorType = 'type-move'; break;
+                    case 'move_up': duration = 1.0; label = 'Move Up'; value = 1; colorType = 'type-move'; break;
+                    case 'move_down': duration = 1.0; label = 'Move Down'; value = -1; colorType = 'type-move'; break;
+                    case 'rot_cw': duration = 1.5; label = 'Turn CW'; value = 90; colorType = 'type-rot'; break;
+                    case 'rot_ccw': duration = 1.5; label = 'Turn CCW'; value = -90; colorType = 'type-rot'; break;
+                }
+
+                const instruction = { id, type, duration, value, label, colorType };
+                state.instructions.push(instruction);
+                this.renderTimeline();
+                this.updatePlannedPath();
+                this.showToast(`Added: ${label}`);
+                this.selectInstruction(instruction);
+            }
+
+            removeInstruction(id) {
+                state.instructions = state.instructions.filter(i => i.id !== id);
+                if(state.selection && state.selection.id === id) this.deselectAll();
+                this.renderTimeline();
+                this.updatePlannedPath();
+            }
+
+            updateInstruction(id, key, val) {
+                const inst = state.instructions.find(i => i.id === id);
+                if(inst) {
+                    inst[key] = parseFloat(val);
+                    this.renderTimeline(); // update width if duration changed
+                    this.updatePlannedPath();
+                }
+            }
+
+            // --- Scene Object Logic ---
+
+            addSceneObject(type) {
+                const id = Date.now();
+                let mesh;
+                let data = { name: type };
+
+                const material = new THREE.MeshStandardMaterial({ color: 0x4a5568, roughness: 0.2, metalness: 0.5 });
+                const accentMat = new THREE.MeshStandardMaterial({ color: 0xd97706, emissive: 0x92400e });
+
+                switch(type) {
+                    case 'arch_gate':
+                        const archGroup = new THREE.Group();
+                        const p1 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2, 0.2), accentMat); p1.position.set(-1, 1, 0);
+                        const p2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2, 0.2), accentMat); p2.position.set(1, 1, 0);
+                        const top = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.2, 0.2), accentMat); top.position.set(0, 2, 0);
+                        archGroup.add(p1, p2, top);
+                        mesh = archGroup;
+                        break;
+                    case 'cube_large':
+                        mesh = new THREE.Mesh(new THREE.BoxGeometry(2,2,2), material);
+                        break;
+                    case 'cube_small':
+                        mesh = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.5,0.5), accentMat);
+                        break;
+                    case 'wall':
+                        mesh = new THREE.Mesh(new THREE.BoxGeometry(4, 1, 0.2), material);
+                        mesh.position.y = 0.5;
+                        break;
+                    case 'landing_pad':
+                        mesh = new THREE.Group();
+                        const pad = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.05, 32), new THREE.MeshStandardMaterial({color:0xffffff}));
+                        const hPad = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 32), accentMat); hPad.rotation.x = -Math.PI/2; hPad.position.y = 0.03;
+                        mesh.add(pad, hPad);
+                        break;
+                    default:
+                        mesh = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), material);
+                }
+
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                // Random pos slightly offset
+                mesh.position.set((Math.random()-0.5)*4, 0, (Math.random()-0.5)*4);
+                
+                // Ensure landing pad/gates are on floor
+                if(type !== 'cube_large' && type !== 'cube_small') mesh.position.y = 0;
+
+                scene.add(mesh);
+                state.sceneObjects.push({ id, type, mesh, data });
+                this.showToast(`Added: ${type}`);
+                this.selectObject(state.sceneObjects[state.sceneObjects.length-1]);
+            }
+
+            updateObjectTransform(id, axis, val) {
+                const obj = state.sceneObjects.find(o => o.id === id);
+                if(obj) {
+                    obj.mesh.position[axis] = parseFloat(val);
+                    if(axis === 'rot') obj.mesh.rotation.y = parseFloat(val) * (Math.PI/180);
+                }
+            }
+
+            // --- UI Rendering ---
+
+            renderTimeline() {
+                const track = document.getElementById('instruction-track');
+                track.innerHTML = '';
+                let timeCursor = 0;
+
+                state.instructions.forEach(inst => {
+                    const el = document.createElement('div');
+                    el.className = `inst-block ${inst.colorType}`;
+                    el.style.left = (timeCursor * CONFIG.scale) + 'px';
+                    el.style.width = (inst.duration * CONFIG.scale) + 'px';
+                    el.textContent = `${inst.label} (${inst.value})`;
+                    
+                    if(state.selection && state.selection.id === inst.id) el.classList.add('selected');
+
+                    el.onclick = (e) => {
+                        e.stopPropagation();
+                        this.selectInstruction(inst);
+                    };
+
+                    track.appendChild(el);
+                    timeCursor += inst.duration;
+                });
+
+                // Update track width
+                const tracksDiv = document.getElementById('timeline-tracks');
+                tracksDiv.style.width = Math.max(container.clientWidth, timeCursor * CONFIG.scale + 100) + 'px';
+                
+                state.simulation.totalDuration = timeCursor;
+            }
+
+            selectInstruction(inst) {
+                state.selection = { type: 'instruction', ...inst };
+                this.renderInspector();
+                this.renderTimeline(); // refresh selection style
+            }
+
+            selectObject(obj) {
+                state.selection = { type: 'object', ...obj };
+                this.renderInspector();
+            }
+
+            deselectAll() {
+                state.selection = null;
+                this.renderInspector();
+                this.renderTimeline();
+            }
+
+            renderInspector() {
+                const container = document.getElementById('inspector-content');
+                container.innerHTML = '';
+
+                if(!state.selection) {
+                    container.innerHTML = '<div class="empty-state">Select an instruction or object to edit properties.</div>';
+                    return;
+                }
+
+                const createRow = (label, value, onChange, type='number') => {
+                    const div = document.createElement('div');
+                    div.className = 'prop-row';
+                    div.innerHTML = `<span class="prop-key">${label}</span>`;
+                    const input = document.createElement('input');
+                    input.className = 'prop-input';
+                    input.type = type;
+                    input.value = value;
+                    input.oninput = (e) => onChange(e.target.value);
+                    div.appendChild(input);
+                    return div;
+                };
+
+                if(state.selection.type === 'instruction') {
+                    const s = state.selection;
+                    const h = document.createElement('h3');
+                    h.style.margin = '0 0 15px 0'; h.style.fontSize = '14px'; h.style.color = CONFIG.colors[s.colorType];
+                    h.innerText = s.label.toUpperCase();
+                    container.appendChild(h);
+
+                    container.appendChild(createRow('Duration (s)', s.duration, (v) => this.updateInstruction(s.id, 'duration', v)));
+                    container.appendChild(createRow('Value/Amount', s.value, (v) => this.updateInstruction(s.id, 'value', v)));
+                    
+                    // Delete button
+                    const btnDel = document.createElement('button');
+                    btnDel.className = 'tool-btn';
+                    btnDel.style.width = '100%';
+                    btnDel.style.marginTop = '10px';
+                    btnDel.style.color = '#ff4757';
+                    btnDel.style.borderColor = '#ff4757';
+                    btnDel.innerText = 'Remove Instruction';
+                    btnDel.onclick = () => this.removeInstruction(s.id);
+                    container.appendChild(btnDel);
+
+                } else if (state.selection.type === 'object') {
+                    const s = state.selection;
+                    const h = document.createElement('h3');
+                    h.style.margin = '0 0 15px 0'; h.style.fontSize = '14px'; h.style.color = '#fff';
+                    h.innerText = s.type.toUpperCase();
+                    container.appendChild(h);
+
+                    container.appendChild(createRow('Pos X', s.mesh.position.x, (v) => this.updateObjectTransform(s.id, 'x', v)));
+                    container.appendChild(createRow('Pos Y', s.mesh.position.y, (v) => this.updateObjectTransform(s.id, 'y', v)));
+                    container.appendChild(createRow('Pos Z', s.mesh.position.z, (v) => this.updateObjectTransform(s.id, 'z', v)));
+                    container.appendChild(createRow('Rot Y (deg)', (s.mesh.rotation.y * 180/Math.PI).toFixed(0), (v) => this.updateObjectTransform(s.id, 'rot', v)));
+                }
+            }
+
+            showToast(msg) {
+                const t = document.getElementById('toast');
+                t.innerText = msg;
+                t.style.opacity = '1';
+                setTimeout(() => t.style.opacity = '0', 2000);
+            }
+
+            setSpeed(s) {
+                state.simulation.speed = s;
+            }
+
+            // --- Simulation & Physics Loop ---
+
+            toggleSimulation() {
+                if(state.simulation.isPlaying) {
+                    state.simulation.isPlaying = false;
+                    document.getElementById('btn-simulate').innerText = "SIMULATE";
+                    document.getElementById('btn-simulate').style.background = "var(--accent)";
+                } else {
+                    // Reset if at end
+                    if(state.simulation.currentTime >= state.simulation.totalDuration) {
+                        state.simulation.currentTime = 0;
+                        this.resetDroneState();
+                    }
+                    state.simulation.isPlaying = true;
+                    state.simulation.lastFrameTime = performance.now();
+                    document.getElementById('btn-simulate').innerText = "STOP";
+                    document.getElementById('btn-simulate').style.background = "#ff4757";
+                }
+            }
+
+            resetDroneState() {
+                state.drone.mesh.position.set(0,0,0);
+                state.drone.mesh.rotation.set(0,0,0);
+                state.drone.actualHistory = [state.drone.mesh.position.clone()];
+                
+                // Clear actual path
+                if(state.drone.pathActualLine) {
+                    scene.remove(state.drone.pathActualLine);
+                    state.drone.pathActualLine = null;
+                }
+                
+                // Reset telemetry
+                this.updateTelemetry(0, 0, 0);
+            }
+
+            updateDroneStartPos() {
+                this.resetDroneState();
+            }
+
+            updatePlannedPath() {
+                if(state.drone.pathPlanLine) scene.remove(state.drone.pathPlanLine);
+
+                // Simulate logically without rendering to calculate points
+                const points = [];
+                let simPos = new THREE.Vector3(0,0,0);
+                let simRot = 0; // radians
+
+                points.push(simPos.clone());
+
+                state.instructions.forEach(inst => {
+                    const steps = 5; // resolution
+                    for(let i=0; i<steps; i++) {
+                        const progress = (i+1)/steps;
+                        // Apply partial instruction
+                        if(inst.type === 'takeoff') simPos.y = THREE.MathUtils.lerp(0, inst.value, progress);
+                        else if(inst.type === 'land') simPos.y = THREE.MathUtils.lerp(simPos.y, 0, progress); // simplified
+                        
+                        // Movement is relative to rotation
+                        const rotX = Math.sin(simRot);
+                        const rotZ = Math.cos(simRot); // in ThreeJS, -Z is forward usually, but let's stick to standard math
+                        
+                        if(inst.type === 'move_fwd') { simPos.x -= rotX * (inst.value/steps); simPos.z -= rotZ * (inst.value/steps); }
+                        if(inst.type === 'move_back') { simPos.x += rotX * (inst.value/steps); simPos.z += rotZ * (inst.value/steps); }
+                        if(inst.type === 'strafe_l') { simPos.x -= rotZ * (inst.value/steps); simPos.z += rotX * (inst.value/steps); } // simplified orthogonal
+                        if(inst.type === 'strafe_r') { simPos.x += rotZ * (inst.value/steps); simPos.z -= rotX * (inst.value/steps); }
+                        
+                        if(inst.type.includes('up')) simPos.y += inst.value/steps;
+                        if(inst.type.includes('down')) simPos.y += inst.value/steps;
+
+                        if(inst.type === 'rot_cw' || inst.type === 'rot_ccw') {
+                            simRot += (inst.value * Math.PI/180) / steps;
+                        }
+                        
+                        points.push(simPos.clone());
+                    }
+                });
+
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                state.drone.pathPlanLine = new THREE.Line(geometry, pathPlanMat);
+                state.drone.pathPlanLine.computeLineDistances();
+                scene.add(state.drone.pathPlanLine);
+            }
+
+            updateTelemetry(speed, alt, head) {
+                document.getElementById('val-speed').innerText = speed.toFixed(1) + ' m/s';
+                document.getElementById('val-alt').innerText = alt.toFixed(2) + ' m';
+                document.getElementById('val-head').innerText = Math.round(head * 180/Math.PI % 360) + '°';
+                document.getElementById('val-time').innerText = state.simulation.currentTime.toFixed(2) + 's';
+                
+                // Mock Drift
+                const drift = speed > 0.1 ? (Math.random() * 0.2).toFixed(2) : "0.00";
+                document.getElementById('val-drift').innerText = drift;
+            }
+
+            // Main Animation Loop
+            animate(now) {
+                requestAnimationFrame(this.animate);
+
+                // Physics / Simulation Step
+                if(state.simulation.isPlaying && state.instructions.length > 0) {
+                    const dt = (now - state.simulation.lastFrameTime) / 1000;
+                    state.simulation.lastFrameTime = now;
+                    
+                    // Apply Time Scale
+                    const step = dt * state.simulation.speed;
+                    state.simulation.currentTime += step;
+
+                    // Calculate position based on current time
+                    let tAccum = 0;
+                    let currentInst = state.instructions[0];
+                    let instProgress = 0;
+
+                    for(let i=0; i<state.instructions.length; i++) {
+                        const inst = state.instructions[i];
+                        if(state.simulation.currentTime >= tAccum && state.simulation.currentTime < tAccum + inst.duration) {
+                            currentInst = inst;
+                            instProgress = (state.simulation.currentTime - tAccum) / inst.duration;
+                            break;
+                        }
+                        tAccum += inst.duration;
+                    }
+
+                    if(currentInst) {
+                        // This is a simplified imperative transform update. 
+                        // In a real app, you'd track absolute state better.
+                        const drone = state.drone.mesh;
+                        
+                        // Continuous movements (simple lerp implementation for this demo)
+                        // Note: For perfect accuracy, we should re-calculate from 0 every frame or integrate.
+                        // Here we just apply the active command's effect incrementally for visual effect.
+                        
+                        const moveSpeed = (currentInst.value / currentInst.duration) * step;
+                        const rotSpeed = ((currentInst.value * Math.PI/180) / currentInst.duration) * step;
+
+                        switch(currentInst.type) {
+                            case 'takeoff':
+                                drone.position.y = THREE.MathUtils.lerp(0, currentInst.value, instProgress);
+                                break;
+                            case 'land':
+                                // Assuming we know current altitude, target 0
+                                drone.position.y = THREE.MathUtils.lerp(1.5, 0, instProgress); 
+                                break;
+                            case 'hover':
+                            case 'wait':
+                                // slight hover noise
+                                drone.position.y = (currentInst.type==='takeoff'?1.5:drone.position.y) + Math.sin(now/200)*0.02;
+                                break;
+                            case 'move_fwd':
+                                drone.translateZ(-moveSpeed);
+                                break;
+                            case 'move_back':
+                                drone.translateZ(moveSpeed);
+                                break;
+                            case 'strafe_l':
+                                drone.translateX(-moveSpeed);
+                                break;
+                            case 'strafe_r':
+                                drone.translateX(moveSpeed);
+                                break;
+                            case 'move_up':
+                                drone.position.y += moveSpeed;
+                                break;
+                            case 'move_down':
+                                drone.position.y += moveSpeed; // value is negative usually
+                                break;
+                            case 'rot_cw':
+                                drone.rotation.y -= rotSpeed;
+                                break;
+                            case 'rot_ccw':
+                                drone.rotation.y += rotSpeed;
+                                break;
+                        }
+                        
+                        // Record Actual Path
+                        if(state.drone.actualHistory.length === 0 || drone.position.distanceTo(state.drone.actualHistory[state.drone.actualHistory.length-1]) > 0.1) {
+                            state.drone.actualHistory.push(drone.position.clone());
+                            this.drawActualPath();
+                        }
+
+                        // Telemetry
+                        const speed = Math.abs(moveSpeed/step); // rough estimate
+                        this.updateTelemetry(speed, drone.position.y, drone.rotation.y);
+
+                        // Playhead
+                        const playhead = document.getElementById('playhead');
+                        playhead.style.left = (state.simulation.currentTime * CONFIG.scale) + 'px';
+
+                        // Auto Scroll Timeline
+                        const scrollContainer = document.getElementById('timeline-scroll');
+                        if(state.simulation.currentTime * CONFIG.scale > scrollContainer.scrollLeft + scrollContainer.clientWidth - 50) {
+                            scrollContainer.scrollLeft += 2;
+                        }
+                    }
+
+                    if(state.simulation.currentTime >= state.simulation.totalDuration) {
+                        this.toggleSimulation(); // Stop
+                    }
+                } else {
+                    state.simulation.lastFrameTime = now;
+                }
+
+                controls.update();
+                renderer.render(scene, camera);
+            }
+
+            drawActualPath() {
+                if(state.drone.pathActualLine) scene.remove(state.drone.pathActualLine);
+                const geometry = new THREE.BufferGeometry().setFromPoints(state.drone.actualHistory);
+                state.drone.pathActualLine = new THREE.Line(geometry, pathActualMat);
+                scene.add(state.drone.pathActualLine);
+            }
+        }
+
+        // Initialize App
+        const app = new App();
+        window.app = app; // Expose to window for HTML onclick handlers
+
+    </script>
+</body>
+</html>

@@ -11,7 +11,7 @@ function FieldShell({
 }) {
   return (
     <label className={`grid gap-2 ${className}`}>
-      <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">
+      <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
         {label}
       </span>
       {children}
@@ -20,7 +20,7 @@ function FieldShell({
 }
 
 const CONTROL_CLASS =
-  'w-full rounded-xl border border-white/8 bg-white/[0.03] px-3.5 py-2.5 text-sm text-slate-100 outline-none transition focus:border-amber-400/50 focus:bg-white/[0.05] focus:ring-2 focus:ring-amber-400/15'
+  'w-full rounded-2xl border border-white/8 bg-[#0b1321]/78 px-3.5 py-3 text-sm text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] outline-none transition placeholder:text-slate-600 focus:border-amber-400/50 focus:bg-[#10192b] focus:ring-2 focus:ring-amber-400/15'
 
 interface NumberFieldProps {
   label: string
@@ -124,7 +124,9 @@ export function SliderField({
           value={value}
           onChange={(event) => onChange(Number(event.target.value))}
         />
-        <strong className="text-xs font-semibold text-slate-200">{display ?? value}</strong>
+        <strong className="min-w-14 rounded-full border border-white/8 bg-white/[0.04] px-2.5 py-1 text-center text-[11px] font-semibold text-slate-200">
+          {display ?? value}
+        </strong>
       </div>
     </FieldShell>
   )

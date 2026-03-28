@@ -1,0 +1,93 @@
+{
+  "project": {
+    "name": "Quantum Control",
+    "updatedAt": "2026-03-27",
+    "purpose": "Browser-based route-planning and simulation workspace for autonomous student drone challenge prep."
+  },
+  "sourceOfTruth": {
+    "human": "docs/AI_HANDOFF.md",
+    "machine": "public/ai-context.json"
+  },
+  "status": {
+    "appState": "active",
+    "preferredLayoutDirection": "mission-control-balanced",
+    "realPrototypeEntry": "prototype-a.html",
+    "staticMockEntry": "public/vanilla-prototypes/index.html"
+  },
+  "architecture": {
+    "stack": [
+      "React",
+      "TypeScript",
+      "Vite",
+      "React Three Fiber",
+      "Three.js",
+      "Zustand",
+      "Dexie",
+      "Cannon-based hybrid simulation"
+    ],
+    "coreFiles": {
+      "types": "src/core/types.ts",
+      "constants": "src/core/constants.ts",
+      "math": "src/core/math.ts",
+      "presets": "src/core/presets.ts",
+      "sampleProject": "src/core/sampleProject.ts",
+      "compile": "src/core/simulation/compile.ts",
+      "simulate": "src/core/simulation/simulate.ts",
+      "analysis": "src/core/simulation/analysis.ts",
+      "store": "src/store/projectStore.ts",
+      "viewport": "src/components/FieldViewport.tsx",
+      "timeline": "src/components/TimelinePanel.tsx"
+    }
+  },
+  "implemented": [
+    "deterministic seeded simulation",
+    "compile to planned segments",
+    "planned plus actual hybrid execution",
+    "replay trace generation and scrubbing",
+    "deep analysis batch runs",
+    "gravity drag drift gusts ground effect dirty air",
+    "carry/coast after movement release",
+    "ordered checkpoints",
+    "landing validation and invalidation",
+    "color mat deterministic detection",
+    "deduped collision events",
+    "collision severity classification",
+    "representative collision contact points",
+    "prototype-a real working layout entry"
+  ],
+  "partial": [
+    "hybrid assisted flight rather than fully independent free-body flight",
+    "yaw-bounded stabilization rather than full rotational dynamics",
+    "collision proxy accuracy improved but still approximate",
+    "timeline sequencer improved but still visually noisy",
+    "ui shell cleaner than before but still needs flattening"
+  ],
+  "notImplemented": [
+    "full rotor-by-rotor quadcopter physics",
+    "full free-spin crash dynamics",
+    "true dynamic triangle-mesh live collider",
+    "fully polished production UI shell"
+  ],
+  "uiNotes": {
+    "goal": "Thin top strip, independent left/right scroll columns, dominant center viewport, timeline dock under scene.",
+    "keep": [
+      "viewport functionality",
+      "timeline functionality",
+      "checkpoint logic",
+      "collision logic",
+      "debug overlays"
+    ],
+    "cleanUpNext": [
+      "flatten Control Center chrome",
+      "flatten Simulation Summary chrome",
+      "reduce top bar density further",
+      "tighten inspector spacing"
+    ]
+  },
+  "validation": {
+    "commands": [
+      "npm run lint",
+      "npm run test:run",
+      "npm run build"
+    ]
+  }
