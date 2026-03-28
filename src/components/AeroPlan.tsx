@@ -96,41 +96,82 @@ function initThree(container: HTMLDivElement) {
 async function makeDrone() {
   const group = new THREE.Group()
 
-  const bodyGeo = new THREE.BoxGeometry(0.4, 0.1, 0.6)
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2d3748 })
-  const body = new THREE.Mesh(bodyGeo, bodyMat)
-  body.castShadow = true
-  group.add(body)
+  try {
+    // Try to load the GLB model
+    const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js')
+    const loader = new GLTFLoader()
+    
+    const gltf = await new Promise<any>((resolve, reject) => {
+      loader.load('/models/temp.glb', resolve, undefined, reject)
+    })
+    
+    const model = gltf.scene
+    
+    // Scale and center the model
+    const box = new THREE.Box3().setFromObject(model)
+    const size = box.getSize(new THREE.Vector3())
+    const center = box.getCenter(new THREE.Vector3())
+    
+    // Scale to approximately 0.4 units (40cm drone)
+    const maxDim = Math.max(size.x, size.y, size.z)
+    const scale = 0.4 / maxDim
+    model.scale.setScalar(scale)
+    
+    // Center the model
+    model.position.sub(center.multiplyScalar(scale))
+    
+    // Enable shadows
+    model.traverse((child: any) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.castShadow = true
+        child.receiveShadow = true
+      }
+    })
+    
+    group.add(model)
+    console.log('[makeDrone] GLB model loaded successfully')
+    
+  } catch (error) {
+    console.warn('[makeDrone] Failed to load GLB, using fallback geometry', error)
+    
+    // Fallback: procedural drone
+    const bodyGeo = new THREE.BoxGeometry(0.4, 0.1, 0.6)
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2d3748 })
+    const body = new THREE.Mesh(bodyGeo, bodyMat)
+    body.castShadow = true
+    group.add(body)
 
-  const armGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.8)
-  const armMat = new THREE.MeshStandardMaterial({ color: 0x718096 })
+    const armGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.8)
+    const armMat = new THREE.MeshStandardMaterial({ color: 0x718096 })
 
-  const arm1 = new THREE.Mesh(armGeo, armMat)
-  arm1.rotation.z = Math.PI / 2
-  arm1.rotation.y = Math.PI / 4
-  group.add(arm1)
+    const arm1 = new THREE.Mesh(armGeo, armMat)
+    arm1.rotation.z = Math.PI / 2
+    arm1.rotation.y = Math.PI / 4
+    group.add(arm1)
 
-  const arm2 = new THREE.Mesh(armGeo, armMat)
-  arm2.rotation.z = Math.PI / 2
-  arm2.rotation.y = -Math.PI / 4
-  group.add(arm2)
+    const arm2 = new THREE.Mesh(armGeo, armMat)
+    arm2.rotation.z = Math.PI / 2
+    arm2.rotation.y = -Math.PI / 4
+    group.add(arm2)
 
-  const rotorGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.01, 16)
-  const rotorMat = new THREE.MeshBasicMaterial({ color: 0xd97706, transparent: true, opacity: 0.8 })
-  const positions = [
-    { x: 0.28, z: 0.28 },
-    { x: -0.28, z: -0.28 },
-    { x: 0.28, z: -0.28 },
-    { x: -0.28, z: 0.28 },
-  ]
+    const rotorGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.01, 16)
+    const rotorMat = new THREE.MeshBasicMaterial({ color: 0xd97706, transparent: true, opacity: 0.8 })
+    const positions = [
+      { x: 0.28, z: 0.28 },
+      { x: -0.28, z: -0.28 },
+      { x: 0.28, z: -0.28 },
+      { x: -0.28, z: 0.28 },
+    ]
 
-  positions.forEach((position) => {
-    const rotor = new THREE.Mesh(rotorGeo, rotorMat)
-    rotor.position.set(position.x, 0.06, position.z)
-    rotor.userData.isRotor = true
-    group.add(rotor)
-  })
+    positions.forEach((position) => {
+      const rotor = new THREE.Mesh(rotorGeo, rotorMat)
+      rotor.position.set(position.x, 0.06, position.z)
+      rotor.userData.isRotor = true
+      group.add(rotor)
+    })
+  }
 
+  // Add point light regardless of model type
   const light = new THREE.PointLight(0xe2e8f0, 1, 5)
   light.position.set(0, 0.2, 0)
   group.add(light)
@@ -194,9 +235,10 @@ export function AeroPlan() {
   const rafRef     = useRef(0)
   const raycasterRef = useRef(new THREE.Raycaster())
   const mouseRef   = useRef(new THREE.Vector2())
-  const dragStateRef = useRef<{ objectId: string; startPos: THREE.Vector3; plane: THREE.Plane } | null>(null)
+  const dragStateRef = useRef<{ objectId: string; startPos: THREE.Vector3; plane: THREE.Plane; mode: 'translate' | 'rotate'; startRotation?: number; startMouseAngle?: number } | null>(null)
   const followModeRef = useRef<string | null>(null) // objectId in follow mode
   const hoveredObjectRef = useRef<string | null>(null)
+  const rotationModeRef = useRef(false) // R key held for rotation
   const spawnPlacementModeRef = useRef(false)
   const measurementModeRef = useRef(false)
   const measurementTargetRef = useRef<string | null>(null) // Object being measured from
@@ -385,6 +427,13 @@ export function AeroPlan() {
     const MOVE_STEP = 0.1 // 10cm per arrow key press
     
     const handleKeyDown = (e: KeyboardEvent) => {
+      // R key - enable rotation mode
+      if (e.key === 'r' || e.key === 'R') {
+        rotationModeRef.current = true
+        e.preventDefault()
+        return
+      }
+      
       // Ctrl+Z - Undo
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
         store.undo()
@@ -538,8 +587,19 @@ export function AeroPlan() {
       }
     }
     
+    const handleKeyUp = (e: KeyboardEvent) => {
+      // R key released - disable rotation mode
+      if (e.key === 'r' || e.key === 'R') {
+        rotationModeRef.current = false
+      }
+    }
+    
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
   }, [store.selectedObjectId, layout.objects, store.snapToGrid])
 
   // ── mouse interaction for object selection and dragging ───────────────────
@@ -636,22 +696,50 @@ export function AeroPlan() {
       
       // Drag mode
       if (dragStateRef.current) {
-        const intersection = new THREE.Vector3()
-        if (raycasterRef.current.ray.intersectPlane(dragStateRef.current.plane, intersection)) {
-          const s = WORLD_SCALE
-          let newX = intersection.x / s
-          let newZ = intersection.z / s
-          
-          if (store.snapToGrid) {
-            newX = Math.round(newX / GRID_SIZE) * GRID_SIZE
-            newZ = Math.round(newZ / GRID_SIZE) * GRID_SIZE
-          }
-          
+        if (dragStateRef.current.mode === 'rotate') {
+          // Rotation mode - calculate angle from object center
           const obj = layout.objects.find(o => o.id === dragStateRef.current?.objectId)
           if (obj) {
-            store.updateFieldObject(dragStateRef.current.objectId, {
-              position: { x: newX, y: obj.position.y, z: newZ }
-            })
+            const s = WORLD_SCALE
+            const objPos = new THREE.Vector3(obj.position.x * s, obj.position.y * s, obj.position.z * s)
+            
+            // Project mouse ray onto ground plane
+            const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -objPos.y)
+            const intersection = new THREE.Vector3()
+            if (raycasterRef.current.ray.intersectPlane(groundPlane, intersection)) {
+              // Calculate angle from object center to mouse
+              const dx = intersection.x - objPos.x
+              const dz = intersection.z - objPos.z
+              const mouseAngle = Math.atan2(dx, dz)
+              
+              // Calculate rotation delta
+              const angleDelta = mouseAngle - (dragStateRef.current.startMouseAngle ?? 0)
+              const newRotation = (dragStateRef.current.startRotation ?? 0) + (angleDelta * 180 / Math.PI)
+              
+              store.updateFieldObject(dragStateRef.current.objectId, {
+                rotation: { ...obj.rotation, y: newRotation }
+              })
+            }
+          }
+        } else {
+          // Translation mode
+          const intersection = new THREE.Vector3()
+          if (raycasterRef.current.ray.intersectPlane(dragStateRef.current.plane, intersection)) {
+            const s = WORLD_SCALE
+            let newX = intersection.x / s
+            let newZ = intersection.z / s
+            
+            if (store.snapToGrid) {
+              newX = Math.round(newX / GRID_SIZE) * GRID_SIZE
+              newZ = Math.round(newZ / GRID_SIZE) * GRID_SIZE
+            }
+            
+            const obj = layout.objects.find(o => o.id === dragStateRef.current?.objectId)
+            if (obj) {
+              store.updateFieldObject(dragStateRef.current.objectId, {
+                position: { x: newX, y: obj.position.y, z: newZ }
+              })
+            }
           }
         }
       }
@@ -717,13 +805,36 @@ export function AeroPlan() {
             followModeRef.current = objectId
             three.controls.enabled = false
           } else {
-            // Single click - start drag
+            // Single click - start drag or rotate
             const obj = layout.objects.find(o => o.id === objectId)
             if (obj) {
               const s = WORLD_SCALE
               const worldPos = new THREE.Vector3(obj.position.x * s, obj.position.y * s, obj.position.z * s)
               const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -worldPos.y)
-              dragStateRef.current = { objectId, startPos: worldPos.clone(), plane }
+              
+              if (rotationModeRef.current) {
+                // Rotation mode - calculate initial angle
+                const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -worldPos.y)
+                const intersection = new THREE.Vector3()
+                if (raycasterRef.current.ray.intersectPlane(groundPlane, intersection)) {
+                  const dx = intersection.x - worldPos.x
+                  const dz = intersection.z - worldPos.z
+                  const startMouseAngle = Math.atan2(dx, dz)
+                  
+                  dragStateRef.current = {
+                    objectId,
+                    startPos: worldPos.clone(),
+                    plane,
+                    mode: 'rotate',
+                    startRotation: obj.rotation.y,
+                    startMouseAngle
+                  }
+                }
+              } else {
+                // Translation mode
+                dragStateRef.current = { objectId, startPos: worldPos.clone(), plane, mode: 'translate' }
+              }
+              
               three.controls.enabled = false
             }
           }
