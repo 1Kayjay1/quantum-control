@@ -444,6 +444,7 @@ function OverviewContent({
 }
 
 function TeachModeContent() {
+  const { sessionId } = useParams<{ sessionId: string }>()
   const [wsConnected, setWsConnected] = useState(false)
   const [droneConnected, setDroneConnected] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -527,14 +528,57 @@ function TeachModeContent() {
             isValid: true, // Assume valid for teach mode
             isBestSoFar: false, // Will be determined by session stats
             elapsedTime: (result.telemetry[result.telemetry.length - 1].timestamp - result.telemetry[0].timestamp) / 1000,
-            wallClockStart: result.telemetry[0].timestamp,
-            wallClockEnd: result.telemetry[result.telemetry.length - 1].timestamp,
+            wallClockStart: new Date(result.telemetry[0].timestamp).toISOString(),
+            wallClockEnd: new Date(result.telemetry[result.telemetry.length - 1].timestamp).toISOString(),
             batteryStart: result.telemetry[0].sensor?.batteryPercent || 0,
             batteryEnd: result.telemetry[result.telemetry.length - 1].sensor?.batteryPercent || 0,
             checkpointResults: [], // No checkpoints in teach mode
             abortReason: null,
+            parentCandidateId: null,
+            mutationDescription: 'Manual teach mode recording',
+            collisionSuspected: false,
+            nearMiss: false,
+            notes: `Teach mode run #${runCount}`,
           },
-          telemetry: result.telemetry,
+          rawTelemetry: result.telemetry,
+          replayFrames: [], // Will be generated later for replay
+          checkpointDefinitions: [], // No checkpoints yet
+          configSnapshot: {
+            sampleInterval: 50,
+            replayInterval: 50,
+            commandClamps: {
+              maxRoll: 100,
+              maxPitch: 100,
+              maxYaw: 100,
+              maxThrottle: 100,
+            },
+            smoothingMode: 'none',
+            checkpointRadius: 30,
+            yawTolerance: 45,
+            safetyDistances: {
+              minFrontRange: 20,
+              minBottomRange: 10,
+              maxAltitude: 200,
+            },
+            lowBatteryThreshold: 20,
+            outOfBoundsLimits: {
+              maxX: 300,
+              maxY: 300,
+              maxZ: 200,
+            },
+            maxSessionRuns: 100,
+            hoverDuration: 1.0,
+            mutationSizes: {
+              timingCompression: 0.05,
+              timingExpansion: 0.05,
+              pitchRollAdjustment: 5,
+              yawAdjustment: 10,
+            },
+            elitePoolSize: 10,
+            acceptanceThreshold: 0.95,
+            loggingVerbosity: 'normal',
+            requiredSdkVersion: '2.5.0',
+          },
         }
         
         await ghostlineService.saveRun(runRecord)
