@@ -444,8 +444,104 @@ function OverviewContent({
 }
 
 function TeachModeContent() {
+  const [wsConnected, setWsConnected] = useState(false)
+  const [droneConnected, setDroneConnected] = useState(false)
+  const [recording, setRecording] = useState(false)
+  const [battery, setBattery] = useState(0)
+  const [runCount, setRunCount] = useState(0)
+  const [connecting, setConnecting] = useState(false)
+
+  useEffect(() => {
+    // Import drone service dynamically
+    import('../ghostline/services/droneService').then(({ droneService }) => {
+      // Connect to WebSocket server
+      droneService.connect().then(() => {
+        setWsConnected(true)
+      }).catch((error) => {
+        console.error('Failed to connect to drone service:', error)
+      })
+
+      // Listen for connection state changes
+      const unsubConnection = droneService.onConnectionState((state) => {
+        setDroneConnected(state.drone === 'connected')
+        if (state.drone === 'connected') {
+          droneService.getBattery().then(setBattery).catch(console.error)
+        }
+      })
+
+      // Listen for telemetry to update battery
+      const unsubTelemetry = droneService.onTelemetry((sample) => {
+        if (sample.sensor?.batteryPercent) {
+          setBattery(sample.sensor.batteryPercent)
+        }
+      })
+
+      return () => {
+        unsubConnection()
+        unsubTelemetry()
+        droneService.disconnect()
+      }
+    })
+  }, [])
+
+  const handleConnectDrone = async () => {
+    setConnecting(true)
+    try {
+      const { droneService } = await import('../ghostline/services/droneService')
+      await droneService.connectDrone()
+    } catch (error) {
+      console.error('Failed to connect drone:', error)
+      alert('Failed to connect to drone. Make sure the Python backend is running.')
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  const handleStartRecording = async () => {
+    try {
+      const { droneService } = await import('../ghostline/services/droneService')
+      await droneService.startRecording()
+      setRecording(true)
+      setRunCount((c) => c + 1)
+    } catch (error) {
+      console.error('Failed to start recording:', error)
+    }
+  }
+
+  const handleStopRecording = async () => {
+    try {
+      const { droneService } = await import('../ghostline/services/droneService')
+      const result = await droneService.stopRecording()
+      setRecording(false)
+      console.log('Recorded telemetry:', result.telemetry)
+      alert(`Recording complete! Captured ${result.telemetry.length} samples.`)
+      // TODO: Save to Firebase
+    } catch (error) {
+      console.error('Failed to stop recording:', error)
+    }
+  }
+
   return (
     <div style={{ maxWidth: '800px' }}>
+      {/* WebSocket Status */}
+      <div
+        style={{
+          background: wsConnected ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+          border: `1px solid ${wsConnected ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+          borderRadius: '8px',
+          padding: '12px 16px',
+          marginBottom: '16px',
+          fontSize: '0.85rem',
+        }}
+      >
+        {wsConnected ? (
+          <span style={{ color: '#10b981' }}>✓ Connected to backend service</span>
+        ) : (
+          <span style={{ color: '#ef4444' }}>✗ Backend service not running. Start: python ghostline-backend/websocket_server.py</span>
+        )}
+      </div>
+
+      {/* Connection Status */}
       <div
         style={{
           background: 'rgba(255, 255, 255, 0.02)',
@@ -456,32 +552,43 @@ function TeachModeContent() {
         }}
       >
         <h3 style={{ marginBottom: '16px' }}>Connection Status</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '16px' }}>
           <div>
             <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>Drone</div>
-            <div style={{ color: '#ef4444' }}>● Disconnected</div>
+            <div style={{ color: droneConnected ? '#10b981' : '#ef4444' }}>
+              ● {droneConnected ? 'Connected' : 'Disconnected'}
+            </div>
           </div>
           <div>
-            <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>Controller</div>
-            <div style={{ color: '#ef4444' }}>● Disconnected</div>
+            <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>Battery</div>
+            <div style={{ color: battery > 30 ? '#10b981' : '#ef4444', fontWeight: 600 }}>
+              {battery}%
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>Runs Recorded</div>
+            <div style={{ fontWeight: 600 }}>{runCount}</div>
           </div>
         </div>
         <button
           type="button"
+          onClick={handleConnectDrone}
+          disabled={!wsConnected || droneConnected || connecting}
           style={{
-            marginTop: '16px',
             padding: '10px 20px',
-            background: 'rgba(6, 182, 212, 0.1)',
-            border: '1px solid rgba(6, 182, 212, 0.3)',
+            background: droneConnected ? 'rgba(16, 185, 129, 0.1)' : 'rgba(6, 182, 212, 0.1)',
+            border: `1px solid ${droneConnected ? 'rgba(16, 185, 129, 0.3)' : 'rgba(6, 182, 212, 0.3)'}`,
             borderRadius: '6px',
-            color: '#06b6d4',
-            cursor: 'pointer',
+            color: droneConnected ? '#10b981' : '#06b6d4',
+            cursor: (!wsConnected || droneConnected || connecting) ? 'not-allowed' : 'pointer',
+            opacity: (!wsConnected || droneConnected || connecting) ? 0.5 : 1,
           }}
         >
-          Connect to Drone
+          {connecting ? 'Connecting...' : droneConnected ? 'Connected' : 'Connect to Drone'}
         </button>
       </div>
 
+      {/* Recording Controls */}
       <div
         style={{
           background: 'rgba(255, 255, 255, 0.02)',
@@ -492,40 +599,81 @@ function TeachModeContent() {
       >
         <h3 style={{ marginBottom: '16px' }}>Recording Controls</h3>
         <p style={{ color: '#64748b', marginBottom: '20px', lineHeight: 1.6 }}>
-          Connect to your CoDrone EDU to begin teaching. The system will record all joystick inputs, sensor data, and flight events at a fixed sample rate.
+          {recording ? (
+            <span style={{ color: '#ef4444', fontWeight: 600 }}>● RECORDING - Fly your route. Click "Stop Recording" when done.</span>
+          ) : (
+            'Connect to your CoDrone EDU and click "Start Recording" to begin teaching. You can record multiple runs to build a better baseline.'
+          )}
         </p>
-        <div style={{ display: 'flex', gap: '12px' }}>
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          {!recording ? (
+            <button
+              type="button"
+              onClick={handleStartRecording}
+              disabled={!droneConnected}
+              style={{
+                padding: '12px 24px',
+                background: droneConnected ? 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)' : '#374151',
+                border: 'none',
+                borderRadius: '6px',
+                color: droneConnected ? '#020408' : '#6b7280',
+                cursor: droneConnected ? 'pointer' : 'not-allowed',
+                fontSize: '0.9rem',
+                fontWeight: 600,
+              }}
+            >
+              Start Recording
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleStopRecording}
+              style={{
+                padding: '12px 24px',
+                background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                border: 'none',
+                borderRadius: '6px',
+                color: '#fff',
+                cursor: 'pointer',
+                fontSize: '0.9rem',
+                fontWeight: 600,
+              }}
+            >
+              Stop Recording
+            </button>
+          )}
           <button
             type="button"
-            disabled
-            style={{
-              padding: '12px 24px',
-              background: '#374151',
-              border: 'none',
-              borderRadius: '6px',
-              color: '#6b7280',
-              cursor: 'not-allowed',
-              fontSize: '0.9rem',
-            }}
-          >
-            Start Recording
-          </button>
-          <button
-            type="button"
-            disabled
+            disabled={!droneConnected || recording}
             style={{
               padding: '12px 24px',
               background: 'transparent',
               border: '1px solid rgba(255, 255, 255, 0.1)',
               borderRadius: '6px',
-              color: '#6b7280',
-              cursor: 'not-allowed',
+              color: (!droneConnected || recording) ? '#6b7280' : '#94a3b8',
+              cursor: (!droneConnected || recording) ? 'not-allowed' : 'pointer',
               fontSize: '0.9rem',
             }}
           >
             Add Checkpoint Marker
           </button>
         </div>
+        
+        {runCount > 0 && (
+          <div
+            style={{
+              marginTop: '20px',
+              padding: '16px',
+              background: 'rgba(6, 182, 212, 0.05)',
+              border: '1px solid rgba(6, 182, 212, 0.15)',
+              borderRadius: '8px',
+            }}
+          >
+            <p style={{ color: '#06b6d4', fontSize: '0.9rem', margin: 0 }}>
+              ✓ {runCount} run{runCount !== 1 ? 's' : ''} recorded. You can record more runs to improve the baseline, or proceed to define checkpoints.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )
