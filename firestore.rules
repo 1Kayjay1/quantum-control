@@ -122,6 +122,69 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Ghostline Collections
+    match /ghostline_workspaces/{workspaceId} {
+      allow read: if isAuthorized() && (
+        isOwner(resource.data.ownerId) ||
+        (resource.data.type == 'team' && request.auth.uid in userDoc().data.teams)
+      );
+
+      allow create: if isAuthorized() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        request.resource.data.type in ['personal', 'team'];
+
+      allow update: if isAuthorized() && isOwner(resource.data.ownerId);
+
+      allow delete: if isAuthorized() && isOwner(resource.data.ownerId);
+    }
+
+    match /ghostline_sessions/{sessionId} {
+      allow read: if isAuthorized() &&
+        exists(/databases/$(database)/documents/ghostline_workspaces/$(resource.data.workspaceId)) &&
+        (
+          isOwner(get(/databases/$(database)/documents/ghostline_workspaces/$(resource.data.workspaceId)).data.ownerId) ||
+          (
+            get(/databases/$(database)/documents/ghostline_workspaces/$(resource.data.workspaceId)).data.type == 'team' &&
+            request.auth.uid in userDoc().data.teams
+          )
+        );
+
+      allow create: if isAuthorized() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        exists(/databases/$(database)/documents/ghostline_workspaces/$(request.resource.data.workspaceId));
+
+      allow update: if isAuthorized() && isOwner(resource.data.ownerId);
+
+      allow delete: if isAuthorized() && isOwner(resource.data.ownerId);
+    }
+
+    match /ghostline_checkpoints/{checkpointId} {
+      allow read: if isAuthorized() &&
+        exists(/databases/$(database)/documents/ghostline_sessions/$(resource.data.sessionId));
+
+      allow create: if isAuthorized() &&
+        exists(/databases/$(database)/documents/ghostline_sessions/$(request.resource.data.sessionId));
+
+      allow update, delete: if isAuthorized() &&
+        exists(/databases/$(database)/documents/ghostline_sessions/$(resource.data.sessionId));
+    }
+
+    match /ghostline_runs/{runId} {
+      allow read: if isAuthorized() &&
+        exists(/databases/$(database)/documents/ghostline_sessions/$(resource.data.summary.sessionId));
+
+      allow create: if isAuthorized() &&
+        exists(/databases/$(database)/documents/ghostline_sessions/$(request.resource.data.summary.sessionId));
+
+      allow update, delete: if isAuthorized() &&
+        exists(/databases/$(database)/documents/ghostline_sessions/$(resource.data.summary.sessionId));
+    }
+
+    match /ghostline_configs/{sessionId} {
+      allow read, write: if isAuthorized() &&
+        exists(/databases/$(database)/documents/ghostline_sessions/$(sessionId));
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

@@ -266,6 +266,9 @@ export function LandingPage() {
           <Link to={isAuthenticated ? '/workspace' : '/login'} style={{ color: '#94a3b8', textDecoration: 'none', fontSize: '0.9rem' }}>
             Workspace
           </Link>
+          <Link to="/ghostline" style={{ color: '#06b6d4', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
+            Ghostline
+          </Link>
           <Link to={isAuthenticated ? '/team' : '/login'} style={{ color: '#94a3b8', textDecoration: 'none', fontSize: '0.9rem' }}>
             Team
           </Link>
@@ -391,6 +394,19 @@ export function LandingPage() {
             }}
           >
             Launch Workspace
+          </Link>
+          <Link
+            to="/ghostline"
+            style={{
+              background: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
+              color: '#020408',
+              padding: '16px 32px',
+              borderRadius: '4px',
+              textDecoration: 'none',
+              fontWeight: 600,
+            }}
+          >
+            Ghostline
           </Link>
           <Link
             to={isAuthenticated ? '/team' : '/signup'}

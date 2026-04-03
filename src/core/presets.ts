@@ -253,7 +253,7 @@ export function createFieldObject(type: FieldObjectType, offset = 0): FieldObjec
         innerHeightCm: OFFICIAL_FIELD_DIMENSIONS_CM.archGate.innerHeight,
         outerDepthCm: OFFICIAL_FIELD_DIMENSIONS_CM.archGate.depth,
       }
-      fieldObject.isSolid = true
+      fieldObject.isSolid = false  // Drone flies UNDER the arch
       break
     case 'keyholeGate':
       fieldObject.metadata = {
@@ -261,7 +261,7 @@ export function createFieldObject(type: FieldObjectType, offset = 0): FieldObjec
         innerDiameterCm: OFFICIAL_FIELD_DIMENSIONS_CM.keyholeGate.innerDiameter,
         outerDepthCm: OFFICIAL_FIELD_DIMENSIONS_CM.keyholeGate.depth,
       }
-      fieldObject.isSolid = true
+      fieldObject.isSolid = false  // Drone flies THROUGH the ring
       break
     case 'landingPad':
       fieldObject.position.y = preset.size.y * 0.5
@@ -290,7 +290,7 @@ export function createFieldObject(type: FieldObjectType, offset = 0): FieldObjec
         largeHoleDiameterCm: OFFICIAL_FIELD_DIMENSIONS_CM.flyThroughPanel.largeHoleDiameter,
         smallHoleDiameterCm: OFFICIAL_FIELD_DIMENSIONS_CM.flyThroughPanel.smallHoleDiameter,
       }
-      fieldObject.isSolid = true
+      fieldObject.isSolid = false  // Drone flies THROUGH the holes
       break
     case 'tunnel':
       fieldObject.metadata = {
@@ -298,7 +298,7 @@ export function createFieldObject(type: FieldObjectType, offset = 0): FieldObjec
         tunnelLengthCm: OFFICIAL_FIELD_DIMENSIONS_CM.tunnel.length,
         innerDiameterCm: OFFICIAL_FIELD_DIMENSIONS_CM.tunnel.diameter,
       }
-      fieldObject.isSolid = true
+      fieldObject.isSolid = false  // Drone flies THROUGH the tunnel
       break
     case 'miniArchGate':
       fieldObject.metadata = {
@@ -308,7 +308,7 @@ export function createFieldObject(type: FieldObjectType, offset = 0): FieldObjec
         innerHeightCm: OFFICIAL_FIELD_DIMENSIONS_CM.miniArchGate.innerHeight,
         tensionStringHeightCm: OFFICIAL_FIELD_DIMENSIONS_CM.miniArchGate.tensionStringHeight,
       }
-      fieldObject.isSolid = true
+      fieldObject.isSolid = false  // Drone flies THROUGH the arch
       break
     case 'cubeLarge':
       fieldObject.metadata = { landingSurface: 'cubeLarge' }

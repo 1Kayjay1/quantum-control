@@ -107,14 +107,15 @@ async function makeDrone() {
     
     const model = gltf.scene
     
-    // Scale and center the model
+    // Scale model to match actual drone dimensions (13.88cm width)
     const box = new THREE.Box3().setFromObject(model)
     const size = box.getSize(new THREE.Vector3())
     const center = box.getCenter(new THREE.Vector3())
     
-    // Scale to approximately 0.4 units (40cm drone)
+    // Target size in world units (13.88cm = 0.1388 world units)
+    const targetSize = 0.1388
     const maxDim = Math.max(size.x, size.y, size.z)
-    const scale = 0.4 / maxDim
+    const scale = targetSize / maxDim
     model.scale.setScalar(scale)
     
     // Center the model
@@ -129,19 +130,23 @@ async function makeDrone() {
     })
     
     group.add(model)
-    console.log('[makeDrone] GLB model loaded successfully')
+    console.log('[makeDrone] GLB model loaded, scaled to', targetSize, 'world units')
     
   } catch (error) {
     console.warn('[makeDrone] Failed to load GLB, using fallback geometry', error)
     
-    // Fallback: procedural drone
-    const bodyGeo = new THREE.BoxGeometry(0.4, 0.1, 0.6)
+    // Fallback: procedural drone matching actual dimensions
+    const w = 0.1388  // 13.88cm
+    const h = 0.0348  // 3.48cm
+    const l = 0.1385  // 13.85cm
+    
+    const bodyGeo = new THREE.BoxGeometry(w * 0.4, h * 0.5, l * 0.3)
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2d3748 })
     const body = new THREE.Mesh(bodyGeo, bodyMat)
     body.castShadow = true
     group.add(body)
 
-    const armGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.8)
+    const armGeo = new THREE.CylinderGeometry(0.005, 0.005, w * 0.8)
     const armMat = new THREE.MeshStandardMaterial({ color: 0x718096 })
 
     const arm1 = new THREE.Mesh(armGeo, armMat)
@@ -154,18 +159,19 @@ async function makeDrone() {
     arm2.rotation.y = -Math.PI / 4
     group.add(arm2)
 
-    const rotorGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.01, 16)
+    const rotorGeo = new THREE.CylinderGeometry(0.028, 0.028, 0.002, 16)
     const rotorMat = new THREE.MeshBasicMaterial({ color: 0xd97706, transparent: true, opacity: 0.8 })
+    const motorOffset = w * 0.4
     const positions = [
-      { x: 0.28, z: 0.28 },
-      { x: -0.28, z: -0.28 },
-      { x: 0.28, z: -0.28 },
-      { x: -0.28, z: 0.28 },
+      { x: motorOffset, z: motorOffset },
+      { x: -motorOffset, z: -motorOffset },
+      { x: motorOffset, z: -motorOffset },
+      { x: -motorOffset, z: motorOffset },
     ]
 
     positions.forEach((position) => {
       const rotor = new THREE.Mesh(rotorGeo, rotorMat)
-      rotor.position.set(position.x, 0.06, position.z)
+      rotor.position.set(position.x, h * 0.3, position.z)
       rotor.userData.isRotor = true
       group.add(rotor)
     })
@@ -173,7 +179,7 @@ async function makeDrone() {
 
   // Add point light regardless of model type
   const light = new THREE.PointLight(0xe2e8f0, 1, 5)
-  light.position.set(0, 0.2, 0)
+  light.position.set(0, 0.02, 0)
   group.add(light)
 
   return group
@@ -244,6 +250,9 @@ export function AeroPlan() {
   const measurementTargetRef = useRef<string | null>(null) // Object being measured from
   const measurementLineRef = useRef<THREE.Line | null>(null)
   const transformControlsRef = useRef<TransformControls | null>(null)
+  // const collisionMarkersRef = useRef<THREE.Group | null>(null)
+  // const hitboxHelperRef = useRef<THREE.LineSegments | null>(null)
+  // const [showHitbox, setShowHitbox] = useState(false)
   const missionLoadedRef = useRef(false)
   const saveTimerRef = useRef<number | null>(null)
   const [, forceUpdate] = useState({})
@@ -326,6 +335,9 @@ export function AeroPlan() {
 
       const three = initThree(el)
       threeRef.current = three
+      
+      // Trigger object rendering
+      setThreeReady(true)
 
       // Add TransformControls for 3D gizmo
       const transformControls = new TransformControls(three.camera, three.renderer.domElement)
@@ -427,6 +439,13 @@ export function AeroPlan() {
     const MOVE_STEP = 0.1 // 10cm per arrow key press
     
     const handleKeyDown = (e: KeyboardEvent) => {
+      // H key - toggle hitbox visualization
+      // if (e.key === 'h' || e.key === 'H') {
+      //   setShowHitbox(prev => !prev)
+      //   e.preventDefault()
+      //   return
+      // }
+      
       // R key - enable rotation mode
       if (e.key === 'r' || e.key === 'R') {
         rotationModeRef.current = true
@@ -890,9 +909,17 @@ export function AeroPlan() {
   }, [layout.objects, store.selectedObjectId, store.snapToGrid])
 
   // ── sync field objects ────────────────────────────────────────────────────
+  const [threeReady, setThreeReady] = useState(false)
+  
   useEffect(() => {
     const three = threeRef.current
     if (!three) return
+    
+    // Mark three as ready so objects can render
+    if (!threeReady) {
+      setThreeReady(true)
+    }
+    
     objMeshes.current.forEach(m => {
       three.scene.remove(m)
       if ((m as any)._outline) three.scene.remove((m as any)._outline)
@@ -950,11 +977,10 @@ export function AeroPlan() {
         }
         
         case 'keyholeGate': {
-          // Yellow/Green circular gate
+          // Yellow/Green circular gate - HOLLOW ring
           const group = new THREE.Group()
-          const outerD = obj.size.x * s
-          const innerD = (obj.metadata?.innerDiameterCm ?? 61) * s
-          const depth = obj.size.z * s
+          const outerR = (obj.size.x * s) / 2
+          const innerR = ((obj.metadata?.innerDiameterCm ?? 61) * s) / 2
           
           const mat = new THREE.MeshStandardMaterial({ 
             color: obj.color ?? '#eab308', 
@@ -964,31 +990,27 @@ export function AeroPlan() {
             emissiveIntensity: isSelected ? 0.3 : 0,
           })
           
-          // Outer ring
-          const outerRing = new THREE.Mesh(
-            new THREE.CylinderGeometry(outerD/2, outerD/2, depth, 32),
+          // Create a torus (donut shape) for the ring
+          const ringThickness = (outerR - innerR) / 2
+          const ringRadius = innerR + ringThickness
+          
+          const torus = new THREE.Mesh(
+            new THREE.TorusGeometry(ringRadius, ringThickness, 16, 32),
             mat
           )
-          outerRing.rotation.x = Math.PI / 2
-          outerRing.castShadow = true
-          group.add(outerRing)
-          
-          // Inner hole (subtract geometry visually with darker inner ring)
-          const innerRing = new THREE.Mesh(
-            new THREE.CylinderGeometry(innerD/2, innerD/2, depth * 1.1, 32),
-            new THREE.MeshStandardMaterial({ color: 0x0b0e14, transparent: true, opacity: 0 })
-          )
-          innerRing.rotation.x = Math.PI / 2
-          group.add(innerRing)
+          torus.rotation.x = Math.PI / 2
+          torus.castShadow = true
+          group.add(torus)
           
           mesh = group
           break
         }
         
         case 'tunnel': {
-          // Blue fabric tunnel
-          const diameter = obj.size.y * s
+          // Blue fabric tunnel - HOLLOW tube
+          const outerRadius = obj.size.y * s / 2  // diameter to radius
           const length = obj.size.x * s
+          const wallThickness = 0.01  // 1cm thick walls
           
           const mat = new THREE.MeshStandardMaterial({ 
             color: obj.color ?? '#3b82f6', 
@@ -999,13 +1021,37 @@ export function AeroPlan() {
             side: THREE.DoubleSide,
           })
           
-          const cylinder = new THREE.Mesh(
-            new THREE.CylinderGeometry(diameter/2, diameter/2, length, 16, 1, true),
+          // Create hollow tube using TorusGeometry trick or manual geometry
+          const group = new THREE.Group()
+          
+          // Outer cylinder
+          const outerCylinder = new THREE.Mesh(
+            new THREE.CylinderGeometry(outerRadius, outerRadius, length, 32, 1, true),
             mat
           )
-          cylinder.rotation.z = Math.PI / 2
-          cylinder.castShadow = true
-          mesh = cylinder
+          outerCylinder.rotation.z = Math.PI / 2
+          outerCylinder.castShadow = true
+          group.add(outerCylinder)
+          
+          // End caps (rings)
+          const ringGeo = new THREE.RingGeometry(outerRadius - wallThickness, outerRadius, 32)
+          const capMat = new THREE.MeshStandardMaterial({ 
+            color: obj.color ?? '#3b82f6', 
+            roughness: 0.7,
+            side: THREE.DoubleSide,
+          })
+          
+          const cap1 = new THREE.Mesh(ringGeo, capMat)
+          cap1.position.x = -length / 2
+          cap1.rotation.y = Math.PI / 2
+          group.add(cap1)
+          
+          const cap2 = new THREE.Mesh(ringGeo, capMat)
+          cap2.position.x = length / 2
+          cap2.rotation.y = Math.PI / 2
+          group.add(cap2)
+          
+          mesh = group
           break
         }
         
@@ -1224,7 +1270,7 @@ export function AeroPlan() {
         }
       })
     }
-  }, [layout.objects, layout.spawn.position, store.selectedObjectId])
+  }, [layout.objects, layout.spawn.position, store.selectedObjectId, threeReady])
 
   // ── sync drone position with spawn point ─────────────────────────────────
   useEffect(() => {
@@ -1752,8 +1798,8 @@ export function AeroPlan() {
             <div style={{
               position:'relative',
               height: Math.max(timelineContentH, 120),
-              minWidth: Math.max(800, totalDuration * PX_PER_SEC + 120),
-              width: Math.max(800, totalDuration * PX_PER_SEC + 120),
+              minWidth: 5000,  // Fixed large width for scrolling
+              width: 5000,
             }}>
               {/* Playhead */}
               <div 
@@ -1805,7 +1851,7 @@ export function AeroPlan() {
                     key={inst.id}
                     onClick={() => store.selectInstruction(inst.id)}
                     onMouseDown={(e) => {
-                      // Dragging to reorder instructions or change lanes
+                      // Free-form dragging like CapCut
                       if (e.button !== 0) return
                       e.stopPropagation()
                       store.selectInstruction(inst.id)
@@ -1867,56 +1913,101 @@ export function AeroPlan() {
                         
                         const dx = upE.clientX - startX
                         const dy = upE.clientY - startY
-                        const newLeft = startLeft + dx
-                        const newStartTime = newLeft / PX_PER_SEC
                         
-                        // Calculate which lane was dropped on
-                        const newLane = Math.max(0, Math.floor(dy / (LANE_H + LANE_GAP)))
+                        // Calculate new position - PIXEL PERFECT, NO SNAPPING OR ROUNDING
+                        const newLeft = Math.max(0, startLeft + dx)
+                        const newStartTime = newLeft / PX_PER_SEC  // Exact, no rounding
                         
-                        // Find where this instruction should be inserted based on time
+                        // Calculate which lane - smooth rounding
+                        const laneOffset = dy / (LANE_H + LANE_GAP)
+                        const newLane = Math.max(0, Math.round(startLane + laneOffset))
+                        
+                        // Get all enabled instructions in order
                         const instructions = route.instructions.filter(i => i.enabled)
                         const currentIndex = instructions.findIndex(i => i.id === inst.id)
                         if (currentIndex === -1) return
                         
-                        // Calculate cumulative times to find new position
-                        let cumTime = 0
-                        let newIndex = 0
-                        for (let i = 0; i < instructions.length; i++) {
-                          if (i === currentIndex) continue
-                          const nextCumTime = cumTime + instructions[i].duration + instructions[i].delayAfter
-                          if (newStartTime < cumTime + instructions[i].duration / 2) {
-                            break
-                          }
-                          cumTime = nextCumTime
-                          newIndex++
+                        // Calculate where this instruction CURRENTLY starts (before drag)
+                        let currentStartTime = 0
+                        for (let i = 0; i < currentIndex; i++) {
+                          currentStartTime += instructions[i].duration + instructions[i].delayAfter - instructions[i].stackNextBy
                         }
                         
-                        // If lane changed, adjust stackNextBy to create overlap
-                        if (newLane !== startLane && newIndex > 0) {
-                          // Calculate how much to stack based on lane difference
-                          const prevInst = instructions[newIndex - 1]
-                          if (prevInst) {
-                            // Stack this instruction to overlap with previous
-                            const overlapAmount = Math.min(prevInst.duration * 0.8, inst.duration * 0.5)
-                            store.updateInstruction(prevInst.id, { 
-                              stackNextBy: overlapAmount 
-                            })
-                          }
-                        }
-
-                        store.updateInstruction(inst.id, { timelineLane: newLane })
+                        // Calculate the time delta we need to apply
+                        const timeDelta = newStartTime - currentStartTime
                         
-                        // Reorder in the actual route
-                        const allInstructions = route.instructions
-                        const actualCurrentIndex = allInstructions.findIndex(i => i.id === inst.id)
-                        const actualNewIndex = allInstructions.findIndex(i => i.id === instructions[newIndex]?.id) ?? allInstructions.length
-                        
-                        if (actualCurrentIndex !== -1 && actualCurrentIndex !== actualNewIndex) {
-                          const direction = actualNewIndex > actualCurrentIndex ? 1 : -1
-                          const steps = Math.abs(actualNewIndex - actualCurrentIndex)
-                          for (let i = 0; i < steps; i++) {
-                            store.moveInstruction(inst.id, direction)
+                        // ONLY adjust THIS instruction's timing, don't touch others
+                        if (currentIndex === 0) {
+                          // First instruction - adjust its delayAfter to position it exactly
+                          const newDelayAfter = Math.max(0, inst.delayAfter + timeDelta)
+                          
+                          // If there's a next instruction, compensate its delayAfter to keep it in place
+                          if (currentIndex + 1 < instructions.length) {
+                            const nextInst = instructions[currentIndex + 1]
+                            const compensatedDelayAfter = Math.max(0, nextInst.delayAfter - timeDelta)
+                            store.updateInstruction(nextInst.id, { delayAfter: compensatedDelayAfter })
                           }
+                          
+                          store.updateInstruction(inst.id, {
+                            delayAfter: newDelayAfter,
+                            timelineLane: newLane
+                          })
+                        } else {
+                          // Not first - adjust the PREVIOUS instruction's delayAfter/stackNextBy
+                          const prevInst = instructions[currentIndex - 1]
+                          
+                          // Store old values to calculate the change
+                          const oldPrevDelayAfter = prevInst.delayAfter
+                          const oldPrevStackNextBy = prevInst.stackNextBy
+                          
+                          // Calculate where previous instruction ends (before this instruction)
+                          let prevEndTime = 0
+                          for (let i = 0; i <= currentIndex - 1; i++) {
+                            if (i < currentIndex - 1) {
+                              prevEndTime += instructions[i].duration + instructions[i].delayAfter - instructions[i].stackNextBy
+                            } else {
+                              // For the previous instruction, calculate where it ends
+                              prevEndTime += instructions[i].duration
+                            }
+                          }
+                          
+                          // Calculate the gap/overlap between prev end and new start
+                          const gapOrOverlap = newStartTime - prevEndTime
+                          
+                          let newPrevDelayAfter = 0
+                          let newPrevStackNextBy = 0
+                          
+                          if (gapOrOverlap >= 0) {
+                            // Gap - set delayAfter on previous, clear stackNextBy
+                            newPrevDelayAfter = gapOrOverlap
+                            newPrevStackNextBy = 0
+                          } else {
+                            // Overlap - set stackNextBy on previous, clear delayAfter
+                            const overlap = Math.abs(gapOrOverlap)
+                            newPrevDelayAfter = 0
+                            newPrevStackNextBy = Math.min(overlap, prevInst.duration - 0.01)
+                          }
+                          
+                          // Calculate how much the cursor will change due to this modification
+                          const oldCursorDelta = oldPrevDelayAfter - oldPrevStackNextBy
+                          const newCursorDelta = newPrevDelayAfter - newPrevStackNextBy
+                          const cursorChange = newCursorDelta - oldCursorDelta
+                          
+                          // Update previous instruction
+                          store.updateInstruction(prevInst.id, {
+                            delayAfter: newPrevDelayAfter,
+                            stackNextBy: newPrevStackNextBy
+                          })
+                          
+                          // Compensate the NEXT instruction (if exists) to keep everything else in place
+                          if (currentIndex + 1 < instructions.length) {
+                            const nextInst = instructions[currentIndex + 1]
+                            const compensatedDelayAfter = Math.max(0, nextInst.delayAfter - cursorChange)
+                            store.updateInstruction(nextInst.id, { delayAfter: compensatedDelayAfter })
+                          }
+                          
+                          // Update lane for this instruction
+                          store.updateInstruction(inst.id, { timelineLane: newLane })
                         }
                       }
                       

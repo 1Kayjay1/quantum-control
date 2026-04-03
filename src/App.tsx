@@ -7,6 +7,10 @@ import { SignupPage } from './pages/SignupPage'
 import { TeamPage } from './pages/TeamPage'
 import { WorkspacePage } from './pages/WorkspacePage'
 import { AeroPlan } from './components/AeroPlan'
+import { GhostlineLandingPage } from './pages/GhostlineLandingPage'
+import { GhostlineWorkspaceBrowserPage } from './pages/GhostlineWorkspaceBrowserPage'
+import { GhostlineSessionBrowserPage } from './pages/GhostlineSessionBrowserPage'
+import { GhostlineWorkspacePage } from './pages/GhostlineWorkspacePage'
 import './App.css'
 
 function App() {
@@ -45,6 +49,33 @@ function App() {
                 <TeamPage />
               </ProtectedRoute>
             }
+          />
+
+          {/* Ghostline routes - CoDrone EDU Route Optimizer */}
+          <Route path="/ghostline" element={<GhostlineLandingPage />} />
+          <Route 
+            path="/ghostline/workspace" 
+            element={
+              <ProtectedRoute requireAuth>
+                <GhostlineWorkspaceBrowserPage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/ghostline/workspace/:workspaceId" 
+            element={
+              <ProtectedRoute requireAuth>
+                <GhostlineSessionBrowserPage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/ghostline/session/:sessionId" 
+            element={
+              <ProtectedRoute requireAuth>
+                <GhostlineWorkspacePage />
+              </ProtectedRoute>
+            } 
           />
           
           {/* Redirect /editor to /workspace for backwards compatibility */}
