@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../hooks/useAuth'
-import type { GhostlineSession, Checkpoint, RunRecord } from '../ghostline/types'
+import type { GhostlineSession, Checkpoint, RunRecord, OptimizerConfig } from '../ghostline/types'
 import * as ghostlineService from '../ghostline/services/ghostlineService'
 
 type ViewMode = 'overview' | 'teach' | 'checkpoints' | 'replay' | 'optimize' | 'history' | 'settings'
@@ -752,27 +752,135 @@ function TeachModeContent() {
 
 function CheckpointsContent({
   checkpoints,
-  session: _session,
-  onReload: _onReload,
+  session,
+  onReload,
 }: {
   checkpoints: Checkpoint[]
   session: GhostlineSession | null
   onReload: () => Promise<void>
 }) {
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [newCheckpoint, setNewCheckpoint] = useState({
+    label: '',
+    x: 0,
+    y: 0,
+    z: 0,
+    radius: 30,
+    desiredHeading: null as number | null,
+    headingTolerance: 45,
+    minHeight: null as number | null,
+    notes: '',
+  })
+  const [runs, setRuns] = useState<RunRecord[]>([])
+  const [selectedRun, setSelectedRun] = useState<string | null>(null)
+  const [selectedSampleIndex, setSelectedSampleIndex] = useState<number | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (session) {
+      loadRuns()
+    }
+  }, [session])
+
+  const loadRuns = async () => {
+    if (!session) return
+    setLoading(true)
+    try {
+      const runData = await ghostlineService.getRuns(session.id, 10)
+      setRuns(runData)
+    } catch (error) {
+      console.error('Failed to load runs:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCreateFromPosition = () => {
+    if (!selectedRun || selectedSampleIndex === null) return
+    
+    const run = runs.find(r => r.summary.runId === selectedRun)
+    if (!run || !run.rawTelemetry[selectedSampleIndex]) return
+    
+    const sample = run.rawTelemetry[selectedSampleIndex]
+    setNewCheckpoint({
+      ...newCheckpoint,
+      x: sample.position?.x || 0,
+      y: sample.position?.y || 0,
+      z: sample.position?.z || 0,
+    })
+    setShowCreateModal(true)
+  }
+
+  const handleCreateCheckpoint = async () => {
+    if (!session || !newCheckpoint.label) return
+    
+    try {
+      await ghostlineService.createCheckpoint({
+        sessionId: session.id,
+        label: newCheckpoint.label,
+        x: newCheckpoint.x,
+        y: newCheckpoint.y,
+        z: newCheckpoint.z,
+        radius: newCheckpoint.radius,
+        orderIndex: checkpoints.length,
+        active: true,
+        desiredHeading: newCheckpoint.desiredHeading !== null ? newCheckpoint.desiredHeading : undefined,
+        headingTolerance: newCheckpoint.headingTolerance,
+        penaltyWeight: 1.0,
+        minHeight: newCheckpoint.minHeight !== null ? newCheckpoint.minHeight : undefined,
+        minEntrySpeed: undefined,
+        maxEntrySpeed: undefined,
+        notes: newCheckpoint.notes,
+      })
+      
+      setShowCreateModal(false)
+      setNewCheckpoint({
+        label: '',
+        x: 0,
+        y: 0,
+        z: 0,
+        radius: 30,
+        desiredHeading: null,
+        headingTolerance: 45,
+        minHeight: null,
+        notes: '',
+      })
+      await onReload()
+    } catch (error) {
+      console.error('Failed to create checkpoint:', error)
+      alert('Failed to create checkpoint. Check console for details.')
+    }
+  }
+
+  const handleDeleteCheckpoint = async (checkpointId: string) => {
+    if (!confirm('Delete this checkpoint?')) return
+    
+    try {
+      await ghostlineService.deleteCheckpoint(checkpointId)
+      await onReload()
+    } catch (error) {
+      console.error('Failed to delete checkpoint:', error)
+      alert('Failed to delete checkpoint.')
+    }
+  }
+
   return (
-    <div style={{ maxWidth: '800px' }}>
+    <div style={{ maxWidth: '1200px' }}>
+      {/* Checkpoint List */}
       <div
         style={{
           background: 'rgba(255, 255, 255, 0.02)',
           border: '1px solid rgba(255, 255, 255, 0.06)',
           borderRadius: '12px',
           padding: '24px',
+          marginBottom: '24px',
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h3>Checkpoint Editor</h3>
+          <h3>Checkpoints ({checkpoints.length})</h3>
           <button
             type="button"
+            onClick={() => setShowCreateModal(true)}
             style={{
               padding: '8px 16px',
               background: 'rgba(6, 182, 212, 0.1)',
@@ -785,9 +893,10 @@ function CheckpointsContent({
             + Add Checkpoint
           </button>
         </div>
+        
         {checkpoints.length === 0 ? (
           <p style={{ color: '#64748b', lineHeight: 1.6 }}>
-            No checkpoints defined. Record a teach session first, then mark positions from the recorded flight path.
+            No checkpoints defined. Create checkpoints manually or select positions from recorded runs below.
           </p>
         ) : (
           <div style={{ display: 'grid', gap: '12px' }}>
@@ -802,7 +911,7 @@ function CheckpointsContent({
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
                       <span style={{ fontSize: '0.75rem', color: '#06b6d4', fontWeight: 600 }}>
                         #{index + 1}
@@ -822,12 +931,15 @@ function CheckpointsContent({
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                      Position: ({cp.x.toFixed(1)}, {cp.y.toFixed(1)}, {cp.z.toFixed(1)}) • Radius: {cp.radius}cm
+                    <div style={{ fontSize: '0.8rem', color: '#64748b', display: 'grid', gap: '4px' }}>
+                      <div>Position: ({cp.x.toFixed(1)}, {cp.y.toFixed(1)}, {cp.z.toFixed(1)}) cm</div>
+                      <div>Radius: {cp.radius} cm • Heading: {cp.desiredHeading !== null ? `${cp.desiredHeading}° ±${cp.headingTolerance}°` : 'Any'}</div>
+                      {cp.notes && <div style={{ fontStyle: 'italic' }}>"{cp.notes}"</div>}
                     </div>
                   </div>
                   <button
                     type="button"
+                    onClick={() => handleDeleteCheckpoint(cp.id)}
                     style={{
                       padding: '4px 8px',
                       background: 'transparent',
@@ -846,11 +958,405 @@ function CheckpointsContent({
           </div>
         )}
       </div>
+
+      {/* Create from Recorded Runs */}
+      <div
+        style={{
+          background: 'rgba(255, 255, 255, 0.02)',
+          border: '1px solid rgba(255, 255, 255, 0.06)',
+          borderRadius: '12px',
+          padding: '24px',
+        }}
+      >
+        <h3 style={{ marginBottom: '16px' }}>Create from Recorded Runs</h3>
+        <p style={{ color: '#64748b', marginBottom: '16px', fontSize: '0.9rem' }}>
+          Select a run and a position from the telemetry to create a checkpoint at that location.
+        </p>
+        
+        {loading ? (
+          <p style={{ color: '#64748b' }}>Loading runs...</p>
+        ) : runs.length === 0 ? (
+          <p style={{ color: '#64748b' }}>No recorded runs available. Record a teach session first.</p>
+        ) : (
+          <div>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '6px' }}>
+                Select Run
+              </label>
+              <select
+                value={selectedRun || ''}
+                onChange={(e) => {
+                  setSelectedRun(e.target.value)
+                  setSelectedSampleIndex(null)
+                }}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '6px',
+                  color: '#e2e8f0',
+                  fontSize: '0.9rem',
+                }}
+              >
+                <option value="">-- Select a run --</option>
+                {runs.map((run) => (
+                  <option key={run.summary.runId} value={run.summary.runId}>
+                    Run #{run.summary.generation} - {run.summary.elapsedTime.toFixed(2)}s - {run.rawTelemetry.length} samples
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            {selectedRun && (() => {
+              const run = runs.find(r => r.summary.runId === selectedRun)
+              if (!run) return null
+              
+              return (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '6px' }}>
+                    Select Position (Time: {selectedSampleIndex !== null ? ((run.rawTelemetry[selectedSampleIndex].timestamp - run.rawTelemetry[0].timestamp) / 1000).toFixed(2) : '0.00'}s)
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max={run.rawTelemetry.length - 1}
+                    value={selectedSampleIndex || 0}
+                    onChange={(e) => setSelectedSampleIndex(parseInt(e.target.value))}
+                    style={{
+                      width: '100%',
+                      marginBottom: '12px',
+                    }}
+                  />
+                  
+                  {selectedSampleIndex !== null && run.rawTelemetry[selectedSampleIndex] && (
+                    <div
+                      style={{
+                        padding: '12px',
+                        background: 'rgba(6, 182, 212, 0.05)',
+                        border: '1px solid rgba(6, 182, 212, 0.15)',
+                        borderRadius: '6px',
+                        marginBottom: '16px',
+                        fontSize: '0.85rem',
+                      }}
+                    >
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                        <div>
+                          <span style={{ color: '#64748b' }}>X:</span>{' '}
+                          <span style={{ color: '#06b6d4' }}>{run.rawTelemetry[selectedSampleIndex].position?.x.toFixed(1) || 0} cm</span>
+                        </div>
+                        <div>
+                          <span style={{ color: '#64748b' }}>Y:</span>{' '}
+                          <span style={{ color: '#06b6d4' }}>{run.rawTelemetry[selectedSampleIndex].position?.y.toFixed(1) || 0} cm</span>
+                        </div>
+                        <div>
+                          <span style={{ color: '#64748b' }}>Z:</span>{' '}
+                          <span style={{ color: '#06b6d4' }}>{run.rawTelemetry[selectedSampleIndex].position?.z.toFixed(1) || 0} cm</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <button
+                    type="button"
+                    onClick={handleCreateFromPosition}
+                    disabled={selectedSampleIndex === null}
+                    style={{
+                      padding: '10px 20px',
+                      background: selectedSampleIndex !== null ? 'rgba(6, 182, 212, 0.1)' : '#374151',
+                      border: `1px solid ${selectedSampleIndex !== null ? 'rgba(6, 182, 212, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`,
+                      borderRadius: '6px',
+                      color: selectedSampleIndex !== null ? '#06b6d4' : '#6b7280',
+                      cursor: selectedSampleIndex !== null ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    Create Checkpoint at This Position
+                  </button>
+                </div>
+              )
+            })()}
+          </div>
+        )}
+      </div>
+
+      {/* Create/Edit Modal */}
+      {showCreateModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.8)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => setShowCreateModal(false)}
+        >
+          <div
+            style={{
+              background: '#0a0e14',
+              border: '1px solid rgba(6, 182, 212, 0.3)',
+              borderRadius: '12px',
+              padding: '24px',
+              maxWidth: '500px',
+              width: '90%',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ marginBottom: '20px' }}>Create Checkpoint</h3>
+            
+            <div style={{ display: 'grid', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '6px' }}>
+                  Label *
+                </label>
+                <input
+                  type="text"
+                  value={newCheckpoint.label}
+                  onChange={(e) => setNewCheckpoint({ ...newCheckpoint, label: e.target.value })}
+                  placeholder="e.g., Start Gate, Turn 1, Finish"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '6px',
+                    color: '#e2e8f0',
+                    fontSize: '0.9rem',
+                  }}
+                />
+              </div>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '6px' }}>
+                    X (cm)
+                  </label>
+                  <input
+                    type="number"
+                    value={newCheckpoint.x}
+                    onChange={(e) => setNewCheckpoint({ ...newCheckpoint, x: parseFloat(e.target.value) || 0 })}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      borderRadius: '6px',
+                      color: '#e2e8f0',
+                      fontSize: '0.9rem',
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '6px' }}>
+                    Y (cm)
+                  </label>
+                  <input
+                    type="number"
+                    value={newCheckpoint.y}
+                    onChange={(e) => setNewCheckpoint({ ...newCheckpoint, y: parseFloat(e.target.value) || 0 })}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      borderRadius: '6px',
+                      color: '#e2e8f0',
+                      fontSize: '0.9rem',
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '6px' }}>
+                    Z (cm)
+                  </label>
+                  <input
+                    type="number"
+                    value={newCheckpoint.z}
+                    onChange={(e) => setNewCheckpoint({ ...newCheckpoint, z: parseFloat(e.target.value) || 0 })}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      borderRadius: '6px',
+                      color: '#e2e8f0',
+                      fontSize: '0.9rem',
+                    }}
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '6px' }}>
+                  Radius (cm)
+                </label>
+                <input
+                  type="number"
+                  value={newCheckpoint.radius}
+                  onChange={(e) => setNewCheckpoint({ ...newCheckpoint, radius: parseFloat(e.target.value) || 30 })}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '6px',
+                    color: '#e2e8f0',
+                    fontSize: '0.9rem',
+                  }}
+                />
+              </div>
+              
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '6px' }}>
+                  Notes (optional)
+                </label>
+                <textarea
+                  value={newCheckpoint.notes}
+                  onChange={(e) => setNewCheckpoint({ ...newCheckpoint, notes: e.target.value })}
+                  rows={2}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '6px',
+                    color: '#e2e8f0',
+                    fontSize: '0.9rem',
+                    resize: 'vertical',
+                  }}
+                />
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+              <button
+                type="button"
+                onClick={handleCreateCheckpoint}
+                disabled={!newCheckpoint.label}
+                style={{
+                  flex: 1,
+                  padding: '10px 20px',
+                  background: newCheckpoint.label ? 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)' : '#374151',
+                  border: 'none',
+                  borderRadius: '6px',
+                  color: newCheckpoint.label ? '#020408' : '#6b7280',
+                  cursor: newCheckpoint.label ? 'pointer' : 'not-allowed',
+                  fontWeight: 600,
+                }}
+              >
+                Create Checkpoint
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(false)}
+                style={{
+                  flex: 1,
+                  padding: '10px 20px',
+                  background: 'transparent',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '6px',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 function ReplayContent({ session }: { session: GhostlineSession | null }) {
+  const [baselineRun, setBaselineRun] = useState<RunRecord | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [replaying, setReplaying] = useState(false)
+  const [progress, setProgress] = useState({ current: 0, total: 0 })
+  const [droneConnected, setDroneConnected] = useState(false)
+
+  useEffect(() => {
+    loadBaseline()
+    checkDroneConnection()
+  }, [session])
+
+  const loadBaseline = async () => {
+    if (!session?.baselineRunId) return
+    
+    setLoading(true)
+    try {
+      const run = await ghostlineService.getRun(session.baselineRunId)
+      setBaselineRun(run)
+    } catch (error) {
+      console.error('Failed to load baseline:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const checkDroneConnection = async () => {
+    try {
+      const { droneService } = await import('../ghostline/services/droneService')
+      const state = await droneService.connectDrone()
+      setDroneConnected(state.drone === 'connected')
+    } catch (error) {
+      setDroneConnected(false)
+    }
+  }
+
+  const handleStartReplay = async () => {
+    if (!baselineRun || !droneConnected) return
+    
+    setReplaying(true)
+    setProgress({ current: 0, total: 0 })
+    
+    try {
+      const { droneService } = await import('../ghostline/services/droneService')
+      const { executeReplay, compileReplayFrames } = await import('../ghostline/services/replayService')
+      
+      // Compile replay frames if not already compiled
+      let frames = baselineRun.replayFrames
+      if (!frames || frames.length === 0) {
+        console.log('Compiling replay frames from telemetry...')
+        frames = compileReplayFrames(baselineRun.rawTelemetry, {
+          sampleInterval: 50,
+          replayInterval: 50,
+          smoothingMode: 'linear',
+          commandClamps: {
+            maxRoll: 100,
+            maxPitch: 100,
+            maxYaw: 100,
+            maxThrottle: 100,
+          },
+        })
+        
+        // Save compiled frames
+        baselineRun.replayFrames = frames
+        await ghostlineService.saveRun(baselineRun)
+      }
+      
+      setProgress({ current: 0, total: frames.length })
+      
+      // Execute replay
+      await executeReplay(frames, droneService, (current, total) => {
+        setProgress({ current, total })
+      })
+      
+      alert('Replay complete!')
+    } catch (error) {
+      console.error('Replay failed:', error)
+      alert(`Replay failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setReplaying(false)
+    }
+  }
+
   const hasBaseline = session?.baselineRunId !== null
 
   return (
@@ -864,30 +1370,118 @@ function ReplayContent({ session }: { session: GhostlineSession | null }) {
         }}
       >
         <h3 style={{ marginBottom: '16px' }}>Replay Engine</h3>
-        {hasBaseline ? (
-          <div>
-            <p style={{ color: '#94a3b8', lineHeight: 1.6, marginBottom: '16px' }}>
-              Baseline route loaded. Connect to drone to begin replay.
-            </p>
-            <button
-              type="button"
-              disabled
-              style={{
-                padding: '10px 20px',
-                background: '#374151',
-                border: 'none',
-                borderRadius: '6px',
-                color: '#6b7280',
-                cursor: 'not-allowed',
-              }}
-            >
-              Start Replay (Connect Drone First)
-            </button>
-          </div>
-        ) : (
+        
+        {loading ? (
+          <p style={{ color: '#64748b' }}>Loading baseline...</p>
+        ) : !hasBaseline ? (
           <p style={{ color: '#64748b', lineHeight: 1.6 }}>
             No baseline route loaded. Complete a teach session to enable replay.
           </p>
+        ) : (
+          <div>
+            <div
+              style={{
+                padding: '16px',
+                background: 'rgba(6, 182, 212, 0.05)',
+                border: '1px solid rgba(6, 182, 212, 0.15)',
+                borderRadius: '8px',
+                marginBottom: '20px',
+              }}
+            >
+              <h4 style={{ fontSize: '0.9rem', marginBottom: '8px' }}>Baseline Route</h4>
+              {baselineRun && (
+                <div style={{ fontSize: '0.85rem', color: '#64748b', display: 'grid', gap: '4px' }}>
+                  <div>Duration: {baselineRun.summary.elapsedTime.toFixed(2)}s</div>
+                  <div>Telemetry Samples: {baselineRun.rawTelemetry.length}</div>
+                  <div>Replay Frames: {baselineRun.replayFrames?.length || 'Not compiled'}</div>
+                  <div>Battery: {baselineRun.summary.batteryStart}% → {baselineRun.summary.batteryEnd}%</div>
+                </div>
+              )}
+            </div>
+            
+            <div
+              style={{
+                padding: '16px',
+                background: droneConnected ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                border: `1px solid ${droneConnected ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                borderRadius: '8px',
+                marginBottom: '20px',
+                fontSize: '0.85rem',
+              }}
+            >
+              {droneConnected ? (
+                <span style={{ color: '#10b981' }}>✓ Drone connected and ready</span>
+              ) : (
+                <span style={{ color: '#ef4444' }}>✗ Drone not connected. Connect drone in Teach Mode first.</span>
+              )}
+            </div>
+            
+            {replaying && (
+              <div
+                style={{
+                  padding: '16px',
+                  background: 'rgba(6, 182, 212, 0.05)',
+                  border: '1px solid rgba(6, 182, 212, 0.15)',
+                  borderRadius: '8px',
+                  marginBottom: '20px',
+                }}
+              >
+                <div style={{ marginBottom: '8px', fontSize: '0.9rem', color: '#06b6d4' }}>
+                  Replaying... {progress.current} / {progress.total} frames
+                </div>
+                <div
+                  style={{
+                    width: '100%',
+                    height: '8px',
+                    background: 'rgba(255, 255, 255, 0.1)',
+                    borderRadius: '4px',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%`,
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #06b6d4 0%, #0891b2 100%)',
+                      transition: 'width 0.3s',
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+            
+            <button
+              type="button"
+              onClick={handleStartReplay}
+              disabled={!droneConnected || replaying}
+              style={{
+                padding: '12px 24px',
+                background: droneConnected && !replaying ? 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)' : '#374151',
+                border: 'none',
+                borderRadius: '6px',
+                color: droneConnected && !replaying ? '#020408' : '#6b7280',
+                cursor: droneConnected && !replaying ? 'pointer' : 'not-allowed',
+                fontSize: '0.9rem',
+                fontWeight: 600,
+              }}
+            >
+              {replaying ? 'Replaying...' : 'Start Replay'}
+            </button>
+            
+            <div
+              style={{
+                marginTop: '20px',
+                padding: '12px',
+                background: 'rgba(245, 158, 11, 0.1)',
+                border: '1px solid rgba(245, 158, 11, 0.3)',
+                borderRadius: '6px',
+                fontSize: '0.85rem',
+                color: '#f59e0b',
+              }}
+            >
+              ⚠️ Safety: Clear the flight area, have emergency stop ready, and monitor the drone during replay.
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -895,7 +1489,143 @@ function ReplayContent({ session }: { session: GhostlineSession | null }) {
 }
 
 function OptimizeContent({ session }: { session: GhostlineSession | null }) {
+  const [baselineRun, setBaselineRun] = useState<RunRecord | null>(null)
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([])
+  const [loading, setLoading] = useState(false)
+  const [optimizing, setOptimizing] = useState(false)
+  const [droneConnected, setDroneConnected] = useState(false)
+  const [optimizationState, setOptimizationState] = useState({
+    generation: 0,
+    bestTime: 0,
+    improvements: 0,
+  })
+  const [maxGenerations, setMaxGenerations] = useState(30)
+  const optimizerRef = useRef<any>(null)
+
+  useEffect(() => {
+    loadData()
+    checkDroneConnection()
+  }, [session])
+
+  const loadData = async () => {
+    if (!session) return
+    
+    setLoading(true)
+    try {
+      const [run, cps] = await Promise.all([
+        session.baselineRunId ? ghostlineService.getRun(session.baselineRunId) : null,
+        ghostlineService.getCheckpoints(session.id),
+      ])
+      setBaselineRun(run)
+      setCheckpoints(cps)
+      if (run) {
+        setOptimizationState(prev => ({ ...prev, bestTime: run.summary.elapsedTime }))
+      }
+    } catch (error) {
+      console.error('Failed to load data:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const checkDroneConnection = async () => {
+    try {
+      const { droneService } = await import('../ghostline/services/droneService')
+      const state = await droneService.connectDrone()
+      setDroneConnected(state.drone === 'connected')
+    } catch (error) {
+      setDroneConnected(false)
+    }
+  }
+
+  const handleStartOptimization = async () => {
+    if (!baselineRun || !droneConnected || !session) return
+    
+    setOptimizing(true)
+    setOptimizationState({ generation: 0, bestTime: baselineRun.summary.elapsedTime, improvements: 0 })
+    
+    try {
+      const { droneService } = await import('../ghostline/services/droneService')
+      const { OptimizationEngine } = await import('../ghostline/services/optimizationService')
+      
+      // Create optimizer
+      const config: OptimizerConfig = {
+        sampleInterval: 50,
+        replayInterval: 50,
+        commandClamps: {
+          maxRoll: 100,
+          maxPitch: 100,
+          maxYaw: 100,
+          maxThrottle: 100,
+        },
+        smoothingMode: 'linear',
+        checkpointRadius: 30,
+        yawTolerance: 45,
+        safetyDistances: {
+          minFrontRange: 20,
+          minBottomRange: 10,
+          maxAltitude: 200,
+        },
+        lowBatteryThreshold: 20,
+        outOfBoundsLimits: {
+          maxX: 300,
+          maxY: 300,
+          maxZ: 200,
+        },
+        maxSessionRuns: 100,
+        hoverDuration: 1.0,
+        mutationSizes: {
+          timingCompression: 0.05,
+          timingExpansion: 0.05,
+          pitchRollAdjustment: 5,
+          yawAdjustment: 10,
+        },
+        elitePoolSize: 10,
+        acceptanceThreshold: 0.95,
+        loggingVerbosity: 'normal',
+        requiredSdkVersion: '2.5.0',
+      }
+      
+      const optimizer = new OptimizationEngine(
+        session.id,
+        baselineRun,
+        checkpoints,
+        config,
+        (state) => {
+          setOptimizationState({
+            generation: state.generation,
+            bestTime: state.bestTime,
+            improvements: state.elitePool.length,
+          })
+        }
+      )
+      
+      optimizerRef.current = optimizer
+      
+      // Run optimization
+      await optimizer.optimize(droneService, maxGenerations)
+      
+      alert(`Optimization complete! Best time: ${optimizer.getState().bestTime.toFixed(2)}s`)
+      
+      // Reload session data
+      await loadData()
+    } catch (error) {
+      console.error('Optimization failed:', error)
+      alert(`Optimization failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setOptimizing(false)
+      optimizerRef.current = null
+    }
+  }
+
+  const handleStopOptimization = () => {
+    if (optimizerRef.current) {
+      optimizerRef.current.stop()
+    }
+  }
+
   const hasBaseline = session?.baselineRunId !== null
+  const hasCheckpoints = checkpoints.length > 0
 
   return (
     <div style={{ maxWidth: '800px' }}>
@@ -908,30 +1638,201 @@ function OptimizeContent({ session }: { session: GhostlineSession | null }) {
         }}
       >
         <h3 style={{ marginBottom: '16px' }}>Optimization Session</h3>
-        {hasBaseline ? (
-          <div>
-            <p style={{ color: '#94a3b8', lineHeight: 1.6, marginBottom: '16px' }}>
-              Baseline route loaded. The optimizer will iteratively refine the route to improve time while maintaining checkpoint validity.
-            </p>
-            <button
-              type="button"
-              disabled
-              style={{
-                padding: '10px 20px',
-                background: '#374151',
-                border: 'none',
-                borderRadius: '6px',
-                color: '#6b7280',
-                cursor: 'not-allowed',
-              }}
-            >
-              Start Optimization Loop (Connect Drone First)
-            </button>
-          </div>
-        ) : (
+        
+        {loading ? (
+          <p style={{ color: '#64748b' }}>Loading...</p>
+        ) : !hasBaseline ? (
           <p style={{ color: '#64748b', lineHeight: 1.6 }}>
             No baseline route loaded. The optimizer requires a taught route and defined checkpoints to begin iteration.
           </p>
+        ) : (
+          <div>
+            {/* Status Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
+              <div
+                style={{
+                  padding: '12px',
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                  borderRadius: '8px',
+                }}
+              >
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>Baseline Time</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, color: '#06b6d4' }}>
+                  {baselineRun?.summary.elapsedTime.toFixed(2)}s
+                </div>
+              </div>
+              <div
+                style={{
+                  padding: '12px',
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                  borderRadius: '8px',
+                }}
+              >
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>Checkpoints</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, color: hasCheckpoints ? '#10b981' : '#ef4444' }}>
+                  {checkpoints.length}
+                </div>
+              </div>
+              <div
+                style={{
+                  padding: '12px',
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                  borderRadius: '8px',
+                }}
+              >
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>Drone Status</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, color: droneConnected ? '#10b981' : '#ef4444' }}>
+                  {droneConnected ? 'Ready' : 'Not Connected'}
+                </div>
+              </div>
+            </div>
+            
+            {/* Optimization Progress */}
+            {optimizing && (
+              <div
+                style={{
+                  padding: '16px',
+                  background: 'rgba(6, 182, 212, 0.05)',
+                  border: '1px solid rgba(6, 182, 212, 0.15)',
+                  borderRadius: '8px',
+                  marginBottom: '20px',
+                }}
+              >
+                <div style={{ marginBottom: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '0.9rem', color: '#06b6d4' }}>
+                      Generation {optimizationState.generation} / {maxGenerations}
+                    </span>
+                    <span style={{ fontSize: '0.9rem', color: '#06b6d4' }}>
+                      Best: {optimizationState.bestTime.toFixed(2)}s
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '8px',
+                      background: 'rgba(255, 255, 255, 0.1)',
+                      borderRadius: '4px',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${(optimizationState.generation / maxGenerations) * 100}%`,
+                        height: '100%',
+                        background: 'linear-gradient(90deg, #06b6d4 0%, #0891b2 100%)',
+                        transition: 'width 0.3s',
+                      }}
+                    />
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
+                  Elite pool: {optimizationState.improvements} candidates
+                </div>
+              </div>
+            )}
+            
+            {/* Configuration */}
+            {!optimizing && (
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '6px' }}>
+                  Max Generations
+                </label>
+                <input
+                  type="number"
+                  value={maxGenerations}
+                  onChange={(e) => setMaxGenerations(parseInt(e.target.value) || 30)}
+                  min="1"
+                  max="100"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '6px',
+                    color: '#e2e8f0',
+                    fontSize: '0.9rem',
+                  }}
+                />
+              </div>
+            )}
+            
+            {/* Controls */}
+            <div style={{ display: 'flex', gap: '12px' }}>
+              {!optimizing ? (
+                <button
+                  type="button"
+                  onClick={handleStartOptimization}
+                  disabled={!droneConnected || !hasCheckpoints}
+                  style={{
+                    flex: 1,
+                    padding: '12px 24px',
+                    background: droneConnected && hasCheckpoints ? 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)' : '#374151',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: droneConnected && hasCheckpoints ? '#020408' : '#6b7280',
+                    cursor: droneConnected && hasCheckpoints ? 'pointer' : 'not-allowed',
+                    fontSize: '0.9rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  Start Optimization Loop
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleStopOptimization}
+                  style={{
+                    flex: 1,
+                    padding: '12px 24px',
+                    background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: '0.9rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  Stop Optimization
+                </button>
+              )}
+            </div>
+            
+            {/* Warnings */}
+            {!hasCheckpoints && (
+              <div
+                style={{
+                  marginTop: '20px',
+                  padding: '12px',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  borderRadius: '6px',
+                  fontSize: '0.85rem',
+                  color: '#ef4444',
+                }}
+              >
+                ⚠️ No checkpoints defined. Create checkpoints first to enable optimization.
+              </div>
+            )}
+            
+            <div
+              style={{
+                marginTop: '20px',
+                padding: '12px',
+                background: 'rgba(245, 158, 11, 0.1)',
+                border: '1px solid rgba(245, 158, 11, 0.3)',
+                borderRadius: '6px',
+                fontSize: '0.85rem',
+                color: '#f59e0b',
+              }}
+            >
+              ℹ️ Optimization will run multiple test flights. Ensure you have spare batteries and a clear flight area.
+            </div>
+          </div>
         )}
       </div>
     </div>
