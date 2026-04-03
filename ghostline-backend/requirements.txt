@@ -1,0 +1,4 @@
+codrone-edu>=2.5.0
+websockets>=12.0
+asyncio>=3.4.3
+python-dotenv>=1.0.0
