@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Ghostline Bridge</title>
+  <style>
+    body {
+      width: 300px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #020408;
+      color: #e2e8f0;
+      margin: 0;
+    }
+    
+    h1 {
+      font-size: 16px;
+      margin: 0 0 12px 0;
+      color: #06b6d4;
+    }
+    
+    .status {
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      font-size: 13px;
+    }
+    
+    .status.connected {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #10b981;
+    }
+    
+    .status.disconnected {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #ef4444;
+    }
+    
+    .status.error {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: #f59e0b;
+    }
+    
+    button {
+      width: 100%;
+      padding: 10px;
+      background: rgba(6, 182, 212, 0.1);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      border-radius: 6px;
+      color: #06b6d4;
+      cursor: pointer;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    
+    button:hover {
+      background: rgba(6, 182, 212, 0.2);
+    }
+    
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .info {
+      font-size: 11px;
+      color: #64748b;
+      line-height: 1.5;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .error-message {
+      font-size: 11px;
+      color: #ef4444;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Ghostline Bridge</h1>
+  
+  <div id="status" class="status disconnected">
+    <div id="status-text">Checking connection...</div>
+    <div id="error-message" class="error-message" style="display: none;"></div>
+  </div>
+  
+  <button id="reconnect-btn">Reconnect</button>
+  <button id="open-app-btn">Open Ghostline</button>
+  
+  <div class="info">
+    <strong>Status:</strong> This extension bridges the Ghostline web app to your local CoDrone EDU hardware.
+    <br><br>
+    <strong>Requirements:</strong>
+    <ul style="margin: 8px 0; padding-left: 20px;">
+      <li>Native helper installed</li>
+      <li>CoDrone EDU connected</li>
+    </ul>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

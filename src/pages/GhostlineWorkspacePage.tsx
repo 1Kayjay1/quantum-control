@@ -513,11 +513,38 @@ function TeachModeContent() {
       const { droneService } = await import('../ghostline/services/droneService')
       const result = await droneService.stopRecording()
       setRecording(false)
+      
       console.log('Recorded telemetry:', result.telemetry)
-      alert(`Recording complete! Captured ${result.telemetry.length} samples.`)
-      // TODO: Save to Firebase
+      
+      // Save to Firebase
+      if (sessionId && result.telemetry.length > 0) {
+        const runRecord: RunRecord = {
+          summary: {
+            runId: `run_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+            sessionId: sessionId,
+            generation: runCount,
+            isBaseline: runCount === 1, // First run is baseline
+            isValid: true, // Assume valid for teach mode
+            isBestSoFar: false, // Will be determined by session stats
+            elapsedTime: (result.telemetry[result.telemetry.length - 1].timestamp - result.telemetry[0].timestamp) / 1000,
+            wallClockStart: result.telemetry[0].timestamp,
+            wallClockEnd: result.telemetry[result.telemetry.length - 1].timestamp,
+            batteryStart: result.telemetry[0].sensor?.batteryPercent || 0,
+            batteryEnd: result.telemetry[result.telemetry.length - 1].sensor?.batteryPercent || 0,
+            checkpointResults: [], // No checkpoints in teach mode
+            abortReason: null,
+          },
+          telemetry: result.telemetry,
+        }
+        
+        await ghostlineService.saveRun(runRecord)
+        alert(`Recording saved! Captured ${result.telemetry.length} samples over ${runRecord.summary.elapsedTime.toFixed(2)}s`)
+      } else {
+        alert(`Recording complete! Captured ${result.telemetry.length} samples (not saved - no session)`)
+      }
     } catch (error) {
       console.error('Failed to stop recording:', error)
+      alert('Failed to save recording. Check console for details.')
     }
   }
 

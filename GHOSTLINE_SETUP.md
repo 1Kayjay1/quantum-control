@@ -5,6 +5,8 @@
 ✅ **GitHub**: All code pushed to `variation-checkpoints-system` branch
 ✅ **Firebase**: Live at https://quantum-control.web.app/ghostline
 ✅ **Backend**: Python service ready in `ghostline-backend/` folder
+✅ **Desktop App**: Portable Electron app in `ghostline-desktop/`
+✅ **Chrome Extension**: Browser extension in `ghostline-extension/`
 
 ## Complete System Architecture
 
@@ -12,7 +14,48 @@
 Web App (React) <--WebSocket--> Python Backend <--SDK--> CoDrone EDU
 ```
 
-## To Use Ghostline with Real Drone
+## Deployment Options for School Computers
+
+### Option 1: Desktop App (Recommended for Most Schools)
+
+**Best for:** Schools that block extensions but allow running .exe files
+
+**Pros:**
+- Single portable executable
+- No browser required
+- Embedded Python runtime
+- Extract and run, no installation
+
+**Setup:**
+1. Download `Ghostline-Portable.exe` (Windows) or equivalent for your OS
+2. Extract to any folder (USB drive, Documents, etc.)
+3. Double-click to run
+4. Connect CoDrone and start teaching!
+
+**See:** `ghostline-desktop/README.md` for build instructions
+
+### Option 2: Chrome Extension (Alternative)
+
+**Best for:** Schools that allow Chrome extensions but restrict executables
+
+**Pros:**
+- Tiny file size (~50 KB)
+- Works in any Chrome/Edge browser
+- Easy to update
+- No executable files
+
+**Setup:**
+1. Load extension in Chrome (Developer mode)
+2. Install native helper (small Python script)
+3. Open web app and connect drone
+
+**See:** `ghostline-extension/README.md` for installation guide
+
+### Option 3: Manual Backend (Development/Testing)
+
+**Best for:** Development and testing on your own computer
+
+## To Use Ghostline with Real Drone (Option 3 - Manual)
 
 ### 1. Install Python Backend
 
